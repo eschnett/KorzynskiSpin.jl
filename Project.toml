@@ -1,0 +1,13 @@
+name = "KorzyńskiSpin"
+uuid = "dddeb715-7fc8-4947-8935-98683755b697"
+authors = ["Erik Schnetter <schnetter@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+AbstractSphericalHarmonics = "ee470b23-2871-4f3a-b920-8523874a9e46"
+FastSphericalHarmonics = "d335c211-7587-445e-a753-f0b1fb7e445f"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SSHT = "f9c319a3-ff8a-48d2-8f6c-2646455c3008"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
