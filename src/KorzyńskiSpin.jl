@@ -1,8 +1,8 @@
 module KorzyńskiSpin
 
 using AbstractSphericalHarmonics
+using Arpack
 using ForwardDiff
-using IterativeSolvers
 using LinearAlgebra
 using LinearOperators
 using StaticArrays
@@ -19,6 +19,11 @@ flatten(xss::SVector{N,<:SVector{M}}) where {N,M} = SVector{N * M}(xss[n][m] for
 Base.chop(x) = abs2(x) < 100eps(x) ? zero(x) : x
 Base.chop(x::Complex) = Complex(chop(real(x)), chop(imag(x)))
 Base.chop(x::SArray) = chop.(x)
+
+################################################################################
+
+Base.:+(A::LinearOperator, B::UniformScaling) = A + Diagonal(fill(B.λ, size(A, 1)))
+Base.:-(A::LinearOperator, B::UniformScaling) = A + -B
 
 ################################################################################
 # Accuracy
@@ -77,6 +82,9 @@ function impose_symmetry(f, t::Tensor{D}; check::Bool=true) where {D}
     end
     @assert norm(t.values, Inf) < Inf
     if check
+        if !(norm(t.values - f.(t.values), Inf) ≤ atol(t.lmax))
+            @show t.values
+        end
         @assert norm(t.values - f.(t.values), Inf) ≤ atol(t.lmax)
     end
     return Tensor{D}(f.(t.values), t.lmax)
@@ -515,130 +523,6 @@ function calc_ricci(g::Tensor{2})
     return Rsc
 end
 
-# function tensor2vector!(v::AbstractVector, g̃::SpinTensor{2})
-#     v[(0 + lv4 + 1):(1 * lv4)] .+= α * g̃.coeffs[1, 1]
-#     v[(1 * lv4 + 1):(2 * lv4)] .+= α * g̃.coeffs[2, 1]
-#     v[(2 + lv4 + 1):(3 * lv4)] .+= α * g̃.coeffs[1, 2]
-#     v[(3 + lv4 + 1):(4 * lv4)] .+= α * g̃.coeffs[2, 2]
-#     return v
-# end
-
-function tensor2vector(g̃::SpinTensor{2}, lmax::Int)
-    nmodes = prod(Tuple(ash_nmodes(lmax)))
-    v = vcat(g̃.coeffs[1, 1], g̃.coeffs[2, 1], g̃.coeffs[1, 2], g̃.coeffs[2, 2])
-    @assert length(v) == 4 * nmodes
-    return v
-end
-
-function vector2tensor(v::AbstractVector, lmax::Int)
-    nmodes = prod(Tuple(ash_nmodes(lmax)))
-    @assert length(v) == 4 * nmodes
-    g̃ = SpinTensor{2}(
-        SMatrix{2,2}(
-            (@view v[(0 * nmodes + 1):(1 * nmodes)]),
-            (@view v[(1 * nmodes + 1):(2 * nmodes)]),
-            (@view v[(2 * nmodes + 1):(3 * nmodes)]),
-            (@view v[(3 * nmodes + 1):(4 * nmodes)]),
-        ),
-        lmax,
-    )
-    return g̃
-end
-
-function ricci_mul!(res, v, α, β, lmax::Int, intRsc)
-    nmodes = prod(Tuple(ash_nmodes(lmax)))
-    res::AbstractVector
-    v::AbstractVector
-    α::Number
-    β::Number
-    @assert length(res) == 4 * nmodes
-    @assert length(v) == 4 * nmodes
-    # g = v
-    # res = (-Rsc[g] + (∫ Rsc[g] / 4π)) g
-    g̃ = vector2tensor(v, lmax)
-    g = Tensor(g̃)
-    g = make_real(g)
-    g = make_symmetric(g)
-    Rsc = calc_ricci(g)
-    Rg = Tensor{2}(
-        [SMatrix{2,2}((-Rsc[] + intRsc / 4π) * g[a, b] for a in 1:2, b in 1:2) for (g, Rsc) in zip(g.values, Rsc.values)], lmax
-    )
-    Rg = make_real(Rg)
-    Rg = make_symmetric(Rg)
-    Rg̃ = SpinTensor(Rg)
-    if β == zero(β)
-        res .= α * tensor2vector(Rg̃, lmax)
-    else
-        res .= α * tensor2vector(Rg̃, lmax) + β * res
-    end
-    return res
-end
-
-function ricci_flow_power(g::Tensor{2})
-    # Normalized Ricci flow:
-    #     ∂ₜg = - 2 Rc[g] + (∫ Rsc[g] / 4π) g
-    # in terms on an unphysical time t.
-    # In 2D with R_ab = 1/2 Rsc g_ab:
-    #     ∂ₜg = - Rsc[g] g + (∫ Rsc[g] / 4π) g
-    # Stationary end state:
-    #     - Rc[g] g + (∫ Rsc[g] / 4π) g = 0
-    # This is an eigenvalue problem.
-    lmax = g.lmax
-    nmodes = prod(Tuple(ash_nmodes(lmax)))
-    Rsc = calc_ricci(g)
-    R̃sc = SpinTensor(Rsc)
-    intRsc = sqrt(4π) * R̃sc.coeffs[][ash_mode_index(0, 0, 0, R̃sc.lmax)]
-    L = LinearOperator(
-        Complex{Float64},
-        4 * nmodes,
-        4 * nmodes,
-        false,
-        false,
-        (res, v, α, β) -> ricci_mul!(res, v, α, β, lmax, intRsc),
-        nothing,
-        nothing,
-    )
-    # g = make_real(g)
-    # g = make_symmetric(g)
-    g̃ = SpinTensor(g)
-    v = tensor2vector(g̃, lmax)
-    λ, v′ = powm!(L, v; verbose=true)
-    println("λ: ", λ)
-    Rg̃ = vector2tensor(v′, lmax)
-    Rg = Tensor(Rg̃)
-    return Rg
-end
-
-function ricci_flow_parabolic(g::Tensor{2})
-    # Normalized Ricci flow:
-    #     ∂ₜg = - 2 Rc[g] + (∫ Rsc[g] / 4π) g
-    # in terms on an unphysical time t.
-    # In 2D with R_ab = 1/2 Rsc g_ab:
-    #     ∂ₜg = - Rsc[g] g + (∫ Rsc[g] / 4π) g
-    lmax = g.lmax
-    g̃ = SpinTensor(g)
-
-    Δt = 0.5 / (lmax + 1)^2
-    for iter in 1:100
-        mode_norms = [mode_norm(g̃, l) for l in 0:lmax]
-        @info "iter: $iter   mode norms: $(chop.(mode_norms))"
-        g = Tensor(g̃)
-        Rsc = calc_ricci(g)
-        R̃sc = SpinTensor(Rsc)
-        intRsc = sqrt(4π) * R̃sc.coeffs[][ash_mode_index(0, 0, 0, R̃sc.lmax)]
-
-        ∂ₜg = Tensor{2}(
-            [SMatrix{2,2}((-Rsc[] + intRsc / 4π) * g[a, b] for a in 1:2, b in 1:2) for (g, Rsc) in zip(g.values, Rsc.values)], lmax
-        )
-        ∂ₜg̃ = SpinTensor(∂ₜg)
-
-        g̃ = g̃ + Δt * ∂ₜg̃
-    end
-
-    g = Tensor(g̃)
-    return g
-end
-
 function ricci_flow(g₀::Tensor{2})
     # In 2D we have
     #     R_ab = 1/2 R g_ab
@@ -674,90 +558,90 @@ function ricci_flow(g₀::Tensor{2})
     # ϕ = Tensor(ϕ̃)
     # @assert ϕ.values[1, 1][] ≈ 1
 
-    function tensor2vector!(v::AbstractVector{T}, ϕ̃::SpinTensor{0,Complex{T}}) where {T}
-        @assert length(v) == nmodes
-        @assert length(ϕ̃.coeffs[]) == nmodes
-        ϕ = Tensor(ϕ̃)
-        ϕ = make_real(ϕ)
-        idx = 0
-        for l in 0:lmax, m in 0:l
-            c = ϕ̃.coeffs[][ash_mode_index(0, l, m, lmax)]
-            v[idx += 1] = real(c)
-            if m > 0
-                v[idx += 1] = imag(c)
-            end
-        end
-        @assert idx == nmodes
-        ϕ̃′ = vector2tensor(v)
-        @assert ϕ̃′.coeffs[] ≈ ϕ̃.coeffs[]
-        return v
-    end
-    tensor2vector(ϕ̃::SpinTensor{0,Complex{T}}) where {T} = tensor2vector!(zeros(T, nmodes), ϕ̃)
-
-    function vector2tensor!(ϕ̃::SpinTensor{0,Complex{T}}, v::AbstractVector{T}) where {T}
-        @assert length(v) == nmodes
-        @assert length(ϕ̃.coeffs[]) == nmodes
-        idx = 0
-        for l in 0:lmax, m in 0:l
-            c = zero(Complex{T})
-            c += v[idx += 1]
-            if m > 0
-                c += im * v[idx += 1]
-            end
-            ϕ̃.coeffs[][ash_mode_index(0, l, m, lmax)] = c
-            if m > 0
-                ϕ̃.coeffs[][ash_mode_index(0, l, -m, lmax)] = bitsign(m) * c'
-            end
-        end
-        @assert idx == nmodes
-        ϕ = Tensor(ϕ̃)
-        ϕ = make_real(ϕ)
-        return ϕ̃
-    end
-    vector2tensor(v::AbstractVector{T}) where {T} = vector2tensor!(SpinTensor{0}(zeros(Complex{T}, nmodes), lmax), v)
-
-    function prod!(res, v, α, β)
-        if !(eltype(res) == Float64)
-            @show eltype(res) eltype(v) typeof(res) typeof(v) typeof(α) typeof(β)
-        end
-        @assert eltype(res) == Float64
-        @assert eltype(v) == Float64
-        local ϕ̃ = vector2tensor(v)
-        local ϕ = Tensor(ϕ̃)
-        local g = Tensor{2}([SMatrix{2,2}(ϕ[] * g₀[a, b] for a in 1:2, b in 1:2) for (ϕ, g₀) in zip(ϕ.values, g₀.values)], lmax)
-        local R = calc_ricci(g)
-        R = make_real(R)
-        local R̃ = SpinTensor(R)
-        local avgR = real(R̃.coeffs[][ash_mode_index(0, 0, 0, lmax)]) / sqrt(4π)
-        local ∂ₜϕ = Tensor{0}([Scalar(-R[] * ϕ[] + 0 * avgR) for (ϕ, R) in zip(ϕ.values, R.values)], lmax)
-        local ∂ₜϕ̃ = SpinTensor(∂ₜϕ)
-        ∂ₜϕ̃.coeffs[][ash_mode_index(0, 0, 0, lmax)] += 1
-        if β == zero(β)
-            res .= α * tensor2vector(∂ₜϕ̃)
-        else
-            res .= α * tensor2vector(∂ₜϕ̃) + β * res
-        end
-        return res
-    end
-    L = LinearOperator(Float64, nmodes, nmodes, false, false, prod!, nothing, nothing)
-
-    # ∂ₜϕ̃ = vector2tensor(L * tensor2vector(ϕ̃))
-    # ∂ₜϕ = Tensor(∂ₜϕ̃)
-    # @info chop.(real.(ϕ̃.coeffs[]))
-    # @info chop.(real.(∂ₜϕ̃.coeffs[]))
-    # ϕ = ∂ₜϕ
-
-    # rhs = SpinTensor{0}(Scalar(zeros(Complex{Float64}, nmodes)), lmax)
-    # rhs.coeffs[][ash_mode_index(0, 0, 0, lmax)] = sqrt(4π)
+    # function tensor2vector!(v::AbstractVector{T}, ϕ̃::SpinTensor{0,Complex{T}}) where {T}
+    #     @assert length(v) == nmodes
+    #     @assert length(ϕ̃.coeffs[]) == nmodes
+    #     ϕ = Tensor(ϕ̃)
+    #     ϕ = make_real(ϕ)
+    #     idx = 0
+    #     for l in 0:lmax, m in 0:l
+    #         c = ϕ̃.coeffs[][ash_mode_index(0, l, m, lmax)]
+    #         v[idx += 1] = real(c)
+    #         if m > 0
+    #             v[idx += 1] = imag(c)
+    #         end
+    #     end
+    #     @assert idx == nmodes
+    #     ϕ̃′ = vector2tensor(v)
+    #     @assert ϕ̃′.coeffs[] ≈ ϕ̃.coeffs[]
+    #     return v
+    # end
+    # tensor2vector(ϕ̃::SpinTensor{0,Complex{T}}) where {T} = tensor2vector!(zeros(T, nmodes), ϕ̃)
     # 
-    # # L * ϕ = rhs
-    # res = zeros(Float64, nmodes)
-    # _, history = bicgstabl!(res, L, tensor2vector(rhs); log=true, max_mv_products=0)
-    # @info history
-    # ϕ̃ = vector2tensor(res)
-    # @info chop.(ϕ̃.coeffs[])
-    # ϕ = Tensor(ϕ̃)
-    # ϕ = make_real(ϕ)
+    # function vector2tensor!(ϕ̃::SpinTensor{0,Complex{T}}, v::AbstractVector{T}) where {T}
+    #     @assert length(v) == nmodes
+    #     @assert length(ϕ̃.coeffs[]) == nmodes
+    #     idx = 0
+    #     for l in 0:lmax, m in 0:l
+    #         c = zero(Complex{T})
+    #         c += v[idx += 1]
+    #         if m > 0
+    #             c += im * v[idx += 1]
+    #         end
+    #         ϕ̃.coeffs[][ash_mode_index(0, l, m, lmax)] = c
+    #         if m > 0
+    #             ϕ̃.coeffs[][ash_mode_index(0, l, -m, lmax)] = bitsign(m) * c'
+    #         end
+    #     end
+    #     @assert idx == nmodes
+    #     ϕ = Tensor(ϕ̃)
+    #     ϕ = make_real(ϕ)
+    #     return ϕ̃
+    # end
+    # vector2tensor(v::AbstractVector{T}) where {T} = vector2tensor!(SpinTensor{0}(zeros(Complex{T}, nmodes), lmax), v)
+    # 
+    # function prod!(res, v, α, β)
+    #     if !(eltype(res) == Float64)
+    #         @show eltype(res) eltype(v) typeof(res) typeof(v) typeof(α) typeof(β)
+    #     end
+    #     @assert eltype(res) == Float64
+    #     @assert eltype(v) == Float64
+    #     local ϕ̃ = vector2tensor(v)
+    #     local ϕ = Tensor(ϕ̃)
+    #     local g = Tensor{2}([SMatrix{2,2}(ϕ[] * g₀[a, b] for a in 1:2, b in 1:2) for (ϕ, g₀) in zip(ϕ.values, g₀.values)], lmax)
+    #     local R = calc_ricci(g)
+    #     R = make_real(R)
+    #     local R̃ = SpinTensor(R)
+    #     local avgR = real(R̃.coeffs[][ash_mode_index(0, 0, 0, lmax)]) / sqrt(4π)
+    #     local ∂ₜϕ = Tensor{0}([Scalar(-R[] * ϕ[] + 0 * avgR) for (ϕ, R) in zip(ϕ.values, R.values)], lmax)
+    #     local ∂ₜϕ̃ = SpinTensor(∂ₜϕ)
+    #     ∂ₜϕ̃.coeffs[][ash_mode_index(0, 0, 0, lmax)] += 1
+    #     if β == zero(β)
+    #         res .= α * tensor2vector(∂ₜϕ̃)
+    #     else
+    #         res .= α * tensor2vector(∂ₜϕ̃) + β * res
+    #     end
+    #     return res
+    # end
+    # L = LinearOperator(Float64, nmodes, nmodes, false, false, prod!, nothing, nothing)
+    # 
+    # # ∂ₜϕ̃ = vector2tensor(L * tensor2vector(ϕ̃))
+    # # ∂ₜϕ = Tensor(∂ₜϕ̃)
+    # # @info chop.(real.(ϕ̃.coeffs[]))
+    # # @info chop.(real.(∂ₜϕ̃.coeffs[]))
+    # # ϕ = ∂ₜϕ
+    # 
+    # # rhs = SpinTensor{0}(Scalar(zeros(Complex{Float64}, nmodes)), lmax)
+    # # rhs.coeffs[][ash_mode_index(0, 0, 0, lmax)] = sqrt(4π)
+    # # 
+    # # # L * ϕ = rhs
+    # # res = zeros(Float64, nmodes)
+    # # _, history = bicgstabl!(res, L, tensor2vector(rhs); log=true, max_mv_products=0)
+    # # @info history
+    # # ϕ̃ = vector2tensor(res)
+    # # @info chop.(ϕ̃.coeffs[])
+    # # ϕ = Tensor(ϕ̃)
+    # # ϕ = make_real(ϕ)
 
     Δt = 0.25 / (lmax + 1)^2
     ΔR_max = 1.0e-8
@@ -798,14 +682,14 @@ function ricci_flow(g₀::Tensor{2})
             # ϕ̃ += Δt * ∂ₜϕ̃
             # Fast flow (Gundlach)
             α = 1
-            β = 1/2
-            A = α / (lmax * (lmax+1)) + β
+            β = 1 / 2
+            A = α / (lmax * (lmax + 1)) + β
             B = β / α
             ρ = 1
             Δϕ = Tensor{0}([Scalar(ρ * (-R[] * ϕ[] + R_avg * ϕ[])) for (ϕ, R) in zip(ϕ.values, R.values)], lmax)
             Δϕ̃ = SpinTensor(Δϕ)
-            for l in 0:lmax, m in -l:l
-                Δϕ̃.coeffs[][ash_mode_index(0,l,m,lmax)] *= A / (1 + B * l * (l+1)) * ρ
+            for l in 0:lmax, m in (-l):l
+                Δϕ̃.coeffs[][ash_mode_index(0, l, m, lmax)] *= A / (1 + B * l * (l + 1)) * ρ
             end
             ϕ̃ += Δϕ̃
             # Filter: Set topmost 4 modes to 0
@@ -827,51 +711,469 @@ function ricci_flow(g₀::Tensor{2})
     return ϕ::Tensor{0}
 end
 
-function main(; lmax::Int=40, visualize::Bool=false)
-    # xform = identity
-    # 
-    # g = make_g(xform, lmax)
-    # check_g(xform, g)
-    #
-    # # Project g_ab into our function space
-    # g̃ = SpinTensor(g)
-    # g̃ = filter_modes(g̃)
-    # g = Tensor(g̃)
-    # g = make_real(g)
-    # g = make_symmetric(g)
-    # check_g(xform, g)
-    # 
-    # # gu^ab
-    # gu = make_gu(g)
-    # gu = make_real(gu)
-    # gu = make_symmetric(gu)
-    # 
-    # # dg_abc = g_ab,c
-    # g̃ = SpinTensor(g)
-    # dg̃ = tensor_gradient(g̃)
-    # dg̃ = filter_modes(dg̃)
-    # dg = Tensor(dg̃)
-    # dg = make_real(dg)
-    # dg = make_symmetric12(dg)
-    # # TODO: Check dg
-    # 
-    # # Γ^a_bc = g^ad (g_dc,b + g_bd,c - g_bc,d) / 2
-    # Γ = make_Γ(gu, dg)
-    # # TODO: Check Γ^a_bc
-    # 
-    # Rm = make_Riemann(g, gu, Γ)
-    # Rm = make_real(Rm)
-    # Rm = make_riemann_symmetry(Rm)
-    # # TODO: Check Rm_abcd
-    # 
-    # Rc = make_Ricci(gu, Rm)
-    # Rc = make_real(Rc)
-    # Rc = make_symmetric(Rc)
-    # # TODO: Check Rc_ab
-    # 
-    # Rsc = make_Rsc(gu, Rc)
-    # Rsc = make_real(Rsc)
+function find_coordinates_flow(g₀::Tensor{2}, ϕ::Tensor{0})
+    lmax = g₀.lmax
+    @assert ϕ.lmax == lmax
+    nmodes = ash_nmodes(lmax)
 
+    g = Tensor{2}([SMatrix{2,2}(ϕ[] * g₀[a, b] for a in 1:2, b in 1:2) for (ϕ, g₀) in zip(ϕ.values, g₀.values)], lmax)
+    g = make_real(g)
+    g = make_symmetric(g)
+
+    # gu^ab
+    gu = make_gu(g)
+    gu = make_real(gu)
+    gu = make_symmetric(gu)
+
+    # dg_abc = g_ab,c
+    g̃ = SpinTensor(g)
+    dg̃ = tensor_gradient(g̃)
+    dg̃ = filter_modes(dg̃)
+    dg = Tensor(dg̃)
+    dg = make_real(dg)
+    dg = make_symmetric12(dg)
+
+    # Γ^a_bc = g^ad (g_dc,b + g_bd,c - g_bc,d) / 2
+    Γ = make_Γ(gu, dg)
+
+    # Coordinates are eigenfunctions of the Laplacian for l=1:
+    # Definition of eigenmodes:
+    #     Δx = -2x
+    #     Δy = -2y
+    #     Δz = -2z
+    # Mode 0 is not present:
+    #     ∫x = ∫y = ∫z = 0
+    # The modes are normalized:
+    #     x⋅x = y⋅y = z⋅z = 1
+    # The modes are orthogonal:
+    #     x⋅y = x⋅z = y⋅z = 0
+
+    # In spectral space:
+    #     -l(l+1)x - Γx = -2x
+    #     (2 - l(l+1)) x = Γx
+
+    # Define a flow method:
+    #     ∂ₜx = Δx + 2x
+
+    # Orthonormality:
+    #     ∂ₜx = Δx + 2x - (x⋅y)y - (x⋅z)z
+
+    c̃ = SpinTensor{0}(Scalar(zeros(Complex{Float64}, nmodes)), lmax)
+    x̃ = SpinTensor{0}(Scalar(zeros(Complex{Float64}, nmodes)), lmax)
+    ỹ = SpinTensor{0}(Scalar(zeros(Complex{Float64}, nmodes)), lmax)
+    z̃ = SpinTensor{0}(Scalar(zeros(Complex{Float64}, nmodes)), lmax)
+    c̃.coeffs[][ash_mode_index(0, 0, 0, lmax)] = sqrt(4π)
+    x̃.coeffs[][ash_mode_index(0, 1, +1, lmax)] = -sqrt(2π)
+    x̃.coeffs[][ash_mode_index(0, 1, -1, lmax)] = +sqrt(2π)
+    ỹ.coeffs[][ash_mode_index(0, 1, +1, lmax)] = +sqrt(2π) * im
+    ỹ.coeffs[][ash_mode_index(0, 1, -1, lmax)] = -sqrt(2π) * im'
+    z̃.coeffs[][ash_mode_index(0, 1, 0, lmax)] = -sqrt(4π)
+
+    Δ_old = Inf
+    for iter in 1:10000
+        c = Tensor(c̃)
+        x = Tensor(x̃)
+        y = Tensor(ỹ)
+        z = Tensor(z̃)
+        c = make_real(c)
+        x = make_real(x)
+        y = make_real(y)
+        z = make_real(z)
+        V = Tensor{0}([Scalar(sqrt(det(g))) for g in g.values], lmax)
+        cc = Tensor{0}([Scalar(sqrt(det(g)) * c[]^2) for (g, c) in zip(g.values, c.values)], lmax)
+        xx = Tensor{0}([Scalar(sqrt(det(g)) * x[]^2) for (g, x) in zip(g.values, x.values)], lmax)
+        yy = Tensor{0}([Scalar(sqrt(det(g)) * y[]^2) for (g, y) in zip(g.values, y.values)], lmax)
+        zz = Tensor{0}([Scalar(sqrt(det(g)) * z[]^2) for (g, z) in zip(g.values, z.values)], lmax)
+        cx = Tensor{0}([Scalar(sqrt(det(g)) * c[] * x[]) for (g, c, x) in zip(g.values, c.values, x.values)], lmax)
+        cy = Tensor{0}([Scalar(sqrt(det(g)) * c[] * y[]) for (g, c, y) in zip(g.values, c.values, y.values)], lmax)
+        cz = Tensor{0}([Scalar(sqrt(det(g)) * c[] * z[]) for (g, c, z) in zip(g.values, c.values, z.values)], lmax)
+        xy = Tensor{0}([Scalar(sqrt(det(g)) * x[] * y[]) for (g, x, y) in zip(g.values, x.values, y.values)], lmax)
+        xz = Tensor{0}([Scalar(sqrt(det(g)) * x[] * z[]) for (g, x, z) in zip(g.values, x.values, z.values)], lmax)
+        yz = Tensor{0}([Scalar(sqrt(det(g)) * y[] * z[]) for (g, y, z) in zip(g.values, y.values, z.values)], lmax)
+        Ṽ = SpinTensor(V)
+        int(f::Tensor{0}) = real(SpinTensor(f).coeffs[][ash_mode_index(0, 0, 0, lmax)] / Ṽ.coeffs[][ash_mode_index(0, 0, 0, lmax)])
+        int_c = int(c)
+        int_x = int(x)
+        int_y = int(y)
+        int_z = int(z)
+        int_cc = int(cc)
+        int_xx = int(xx)
+        int_yy = int(yy)
+        int_zz = int(zz)
+        int_cx = int(cx)
+        int_cy = int(cy)
+        int_cz = int(cz)
+        int_xy = int(xy)
+        int_xz = int(xz)
+        int_yz = int(yz)
+        # These hold only for a manifestly round metric
+        # @assert int_c ≈ 1
+        # @assert int_x + 1 ≈ 1
+        # @assert int_y + 1 ≈ 1
+        # @assert int_z + 1 ≈ 1
+        # @assert int_cc ≈ 1
+        # @assert int_xx ≈ 1
+        # @assert int_yy ≈ 1
+        # @assert int_zz ≈ 1
+        # @assert int_cx + 1 ≈ 1
+        # @assert int_cy + 1 ≈ 1
+        # @assert int_cz + 1 ≈ 1
+        # @assert int_xy + 1 ≈ 1
+        # @assert int_xz + 1 ≈ 1
+        # @assert int_yz + 1 ≈ 1
+
+        # Orthonormalize via Gram-Schmidt
+        error("TODO: do this properly, otherwise unstable")
+        x̃ -= int_cx * c̃
+
+        dc̃ = tensor_gradient(c̃)
+        dx̃ = tensor_gradient(x̃)
+        dỹ = tensor_gradient(ỹ)
+        dz̃ = tensor_gradient(z̃)
+        ddc̃ = tensor_gradient(dc̃)
+        ddx̃ = tensor_gradient(dx̃)
+        ddỹ = tensor_gradient(dỹ)
+        ddz̃ = tensor_gradient(dz̃)
+        dc = Tensor(dc̃)
+        dx = Tensor(dx̃)
+        dy = Tensor(dỹ)
+        dz = Tensor(dz̃)
+        ddc = Tensor(ddc̃)
+        ddx = Tensor(ddx̃)
+        ddy = Tensor(ddỹ)
+        ddz = Tensor(ddz̃)
+        Lc = Tensor{0}(
+            [
+                Scalar(sum(gu[a, b] * (ddc[a, b] - sum(Γ[c, a, b] * dc[c] for c in 1:2)) for a in 1:2, b in 1:2)) for
+                (gu, Γ, dc, ddc) in zip(gu.values, Γ.values, dc.values, ddc.values)
+            ],
+            lmax,
+        )
+        Lx = Tensor{0}(
+            [
+                Scalar(sum(gu[a, b] * (ddx[a, b] - sum(Γ[c, a, b] * dx[c] for c in 1:2)) for a in 1:2, b in 1:2)) for
+                (gu, Γ, dx, ddx) in zip(gu.values, Γ.values, dx.values, ddx.values)
+            ],
+            lmax,
+        )
+        Ly = Tensor{0}(
+            [
+                Scalar(sum(gu[a, b] * (ddy[a, b] - sum(Γ[c, a, b] * dy[c] for c in 1:2)) for a in 1:2, b in 1:2)) for
+                (gu, Γ, dy, ddy) in zip(gu.values, Γ.values, dy.values, ddy.values)
+            ],
+            lmax,
+        )
+        Lz = Tensor{0}(
+            [
+                Scalar(sum(gu[a, b] * (ddz[a, b] - sum(Γ[c, a, b] * dz[c] for c in 1:2)) for a in 1:2, b in 1:2)) for
+                (gu, Γ, dz, ddz) in zip(gu.values, Γ.values, dz.values, ddz.values)
+            ],
+            lmax,
+        )
+        Lc̃ = SpinTensor(Lc)
+        Lx̃ = SpinTensor(Lx)
+        Lỹ = SpinTensor(Ly)
+        Lz̃ = SpinTensor(Lz)
+
+        ∂ₜc = Tensor{0}([Scalar(Lc[] - 0 * (int_c - 1)) for (Lc, c) in zip(Lc.values, c.values)], lmax)
+        ∂ₜx = Tensor{0}(
+            [
+                Scalar(Lx[] + 2 * x[] - 0 * int_cx * c[] - 0 * (int_xx - 1) * x[] - 0 * int_xy * y[] - 0 * int_xz * z[]) for
+                (Lx, c, x, y, z) in zip(Lx.values, c.values, x.values, y.values, z.values)
+            ],
+            lmax,
+        )
+        ∂ₜy = Tensor{0}(
+            [
+                Scalar(Ly[] + 2 * y[] - int_xy * x[] - (int_yy - 1) * y[] - int_yz * z[]) for
+                (Ly, x, y, z) in zip(Ly.values, x.values, y.values, z.values)
+            ],
+            lmax,
+        )
+        ∂ₜz = Tensor{0}(
+            [
+                Scalar(Lz[] + 2 * z[] - int_xz * x[] - int_yz * y[] - (int_zz - 1) * z[]) for
+                (Lz, x, y, z) in zip(Lz.values, x.values, y.values, z.values)
+            ],
+            lmax,
+        )
+
+        ∂ₜc̃ = SpinTensor(∂ₜc)
+        ∂ₜx̃ = SpinTensor(∂ₜx)
+        ∂ₜỹ = SpinTensor(∂ₜy)
+        ∂ₜz̃ = SpinTensor(∂ₜz)
+
+        Δ = norm(∂ₜc̃.coeffs[], Inf) + norm(∂ₜx̃.coeffs[], Inf) # + norm(∂ₜỹ.coeffs[], Inf) + norm(∂ₜz̃.coeffs[], Inf)
+        did_fail = Δ ≥ Δ_old
+        do_exit = did_fail && iter ≥ 10
+        if iter % 10 == 0 || do_exit
+            # println("$iter:   Δ: $Δ   |x|=$(norm(x̃.coeffs[], Inf))   int_xx=$int_xx   int_xy=$int_xy   int_xz=$int_xz")
+            # println(
+            #     "$iter:   Δ: $Δ   |x|=$(norm(x̃.coeffs[], Inf))   int_x=$int_x   int_xx=$int_xx   x̃[0]=$(chop(real(x̃.coeffs[][ash_mode_index(0,0,0,lmax)])))",
+            # )
+            println("$iter:   Δ: $Δ")
+            println("   |c|=$(norm(c̃.coeffs[], Inf))   |Lc|=$(norm(Lc̃.coeffs[], Inf))   int_c=$int_c")
+            println("   |x|=$(norm(x̃.coeffs[], Inf))   |Lx|=$(norm(Lx̃.coeffs[], Inf))   int_x=$int_x   int_cx=$int_cx")
+        end
+
+        if true || !did_fail
+            Δt = 0.5 / (lmax + 1)^2
+            # @show chop.(x̃.coeffs[])
+            # @show chop.(∂ₜx̃.coeffs[])
+            c̃ += Δt * ∂ₜc̃
+            x̃ += Δt * ∂ₜx̃
+            #TODO ỹ += Δt * ∂ₜỹ
+            #TODO z̃ += Δt * ∂ₜz̃
+        end
+
+        do_exit && break
+
+        c = Tensor(c̃)
+        x = Tensor(x̃)
+        c = make_real(c)
+        x = make_real(x)
+        c̃ = SpinTensor(c)
+        x̃ = SpinTensor(x)
+
+        Δ_old = Δ
+    end
+
+    c = Tensor(c̃)
+    x = Tensor(x̃)
+    y = Tensor(ỹ)
+    z = Tensor(z̃)
+    c = make_real(c)
+    x = make_real(x)
+    y = make_real(y)
+    z = make_real(z)
+
+    return c, x, y, z
+end
+
+function find_coordinates(g₀::Tensor{2}, ϕ::Tensor{0})
+    lmax = g₀.lmax
+    @assert ϕ.lmax == lmax
+    nmodes = prod(ash_nmodes(lmax))
+
+    g = Tensor{2}([SMatrix{2,2}(ϕ[] * g₀[a, b] for a in 1:2, b in 1:2) for (ϕ, g₀) in zip(ϕ.values, g₀.values)], lmax)
+    g = make_real(g)
+    g = make_symmetric(g)
+
+    # gu^ab
+    gu = make_gu(g)
+    gu = make_real(gu)
+    gu = make_symmetric(gu)
+
+    # dg_abc = g_ab,c
+    g̃ = SpinTensor(g)
+    dg̃ = tensor_gradient(g̃)
+    dg̃ = filter_modes(dg̃)
+    dg = Tensor(dg̃)
+    dg = make_real(dg)
+    dg = make_symmetric12(dg)
+
+    # Γ^a_bc = g^ad (g_dc,b + g_bd,c - g_bc,d) / 2
+    Γ = make_Γ(gu, dg)
+
+    # Coordinates are eigenfunctions of the Laplacian for l=1:
+    # Definition of eigenmodes:
+    #     Δx = -2x
+    #     Δy = -2y
+    #     Δz = -2z
+
+    # function tensor2vector!(v::AbstractVector{T}, t̃::SpinTensor{0,Complex{T}}) where {T}
+    #     @assert length(v) == nmodes
+    #     @assert length(t̃.coeffs[]) == nmodes
+    #     t = Tensor(t̃)
+    #     t = make_real(t)
+    #     idx = 0
+    #     for l in 0:lmax, m in 0:l
+    #         c = t̃.coeffs[][ash_mode_index(0, l, m, lmax)]
+    #         v[idx += 1] = real(c)
+    #         if m > 0
+    #             v[idx += 1] = imag(c)
+    #         end
+    #     end
+    #     @assert idx == nmodes
+    #     return v
+    # end
+    # tensor2vector(t̃::SpinTensor{0,Complex{T}}) where {T} = tensor2vector!(zeros(T, nmodes), t̃)
+    # 
+    # function vector2tensor!(t̃::SpinTensor{0,Complex{T}}, v::AbstractVector{T}) where {T}
+    #     @assert length(v) == nmodes
+    #     @assert length(t̃.coeffs[]) == nmodes
+    #     idx = 0
+    #     for l in 0:lmax, m in 0:l
+    #         c = zero(Complex{T})
+    #         c += v[idx += 1]
+    #         if m > 0
+    #             c += im * v[idx += 1]
+    #         end
+    #         t̃.coeffs[][ash_mode_index(0, l, m, lmax)] = c
+    #         if m > 0
+    #             t̃.coeffs[][ash_mode_index(0, l, -m, lmax)] = bitsign(m) * c'
+    #         end
+    #     end
+    #     @assert idx == nmodes
+    #     return t̃
+    # end
+    # vector2tensor(v::AbstractVector{T}) where {T} = vector2tensor!(SpinTensor{0}(zeros(Complex{T}, nmodes), lmax), v)
+
+    tensor2vector!(v::AbstractVector, t̃::SpinTensor{0}) = (v .= t̃.coeffs[]; v)
+    tensor2vector(t̃::SpinTensor{0,T}) where {T} = tensor2vector!(zeros(T, nmodes), t̃)
+
+    vector2tensor!(t̃::SpinTensor{0}, v::AbstractVector) = (t̃.coeffs[] .= v; t̃)
+    vector2tensor(v::AbstractVector{T}) where {T} = vector2tensor!(SpinTensor{0}(zeros(T, nmodes), lmax), v)
+
+    function prod!(res, v, α, β)
+        # @assert eltype(res) == Float64
+        # @assert eltype(v) == Float64
+        local t̃ = vector2tensor(v)
+        local dt̃ = tensor_gradient(t̃)
+        local ddt̃ = tensor_gradient(dt̃)
+        local t = Tensor(t̃)
+        local dt = Tensor(dt̃)
+        local ddt = Tensor(ddt̃)
+        local Lt = Tensor{0}(
+            [
+                Scalar(sum(gu[a, b] * (ddt[a, b] - sum(Γ[c, a, b] * dt[c] for c in 1:2)) for a in 1:2, b in 1:2)) for
+                (gu, Γ, dt, ddt) in zip(gu.values, Γ.values, dt.values, ddt.values)
+            ],
+            lmax,
+        )
+        Lt̃ = SpinTensor(Lt)
+        if β == zero(β)
+            res .= α * tensor2vector(Lt̃)
+        else
+            res .= α * tensor2vector(Lt̃̃) + β * res
+        end
+        return res
+    end
+
+    println("Calling eigs...")
+    # L = LinearOperator(Float64, nmodes, nmodes, false, false, prod!, nothing, nothing)
+    # λ, v, nconv, niter, nmult, resid = eigs(L; nev=9, ritzvec=true, tol=eps()^(7/8), v0=ones(nmodes), which=:LR)
+    L = LinearOperator(Complex{Float64}, nmodes, nmodes, false, false, prod!, nothing, nothing)
+    λ, v, nconv, niter, nmult, resid = eigs(L; nev=9, ritzvec=true, tol=eps()^(7 / 8), v0=ones(Complex{Float64}, nmodes), which=:LR)
+    println("    nconv=$nconv   niter=$niter   nmult=$nmult   |resid|=$(norm(resid))")
+    for (i, λ) in enumerate(λ)
+        println("    λ[$i]=$(chop(λ))   v[1,$i]=$(chop(v[1,i]))")
+    end
+    # @show resid
+    # @show v[1,:]
+
+    @assert isapprox(λ[1], 0; atol=sqrt(sqrt(eps())))
+    @assert isapprox(λ[2], -2; atol=sqrt(sqrt(eps())))
+    @assert isapprox(λ[3], -2; atol=sqrt(sqrt(eps())))
+    @assert isapprox(λ[4], -2; atol=sqrt(sqrt(eps())))
+
+    x̃ = SpinTensor{0}(Scalar(@view v[:, 2]), lmax)
+    ỹ = SpinTensor{0}(Scalar(@view v[:, 3]), lmax)
+    z̃ = SpinTensor{0}(Scalar(@view v[:, 4]), lmax)
+    x = Tensor(x̃)
+    y = Tensor(ỹ)
+    z = Tensor(z̃)
+    # @show norm(imag.(map(x -> x[], x.values)))
+    # @show norm(imag.(map(x -> x[], y.values)))
+    # @show norm(imag.(map(x -> x[], z.values)))
+    x = make_real(x)
+    y = make_real(y)
+    z = make_real(z)
+
+    # Orthonormalize
+    V = Tensor{0}([Scalar(sqrt(det(g))) for g in g.values], lmax)
+    Ṽ = SpinTensor(V)
+    int(f::Tensor{0}) = real(SpinTensor(f).coeffs[][ash_mode_index(0, 0, 0, lmax)] / Ṽ.coeffs[][ash_mode_index(0, 0, 0, lmax)])
+    function dot(x::Tensor{0}, y::Tensor{0})
+        return int(Tensor{0}([Scalar(sqrt(det(g)) * x[] * y[]) for (g, x, y) in zip(g.values, x.values, y.values)], lmax))
+    end
+
+    x.values ./= sqrt(dot(x, x))
+
+    y.values ./= sqrt(dot(y, y))
+    y.values .-= dot(y, x) * x.values
+    y.values ./= sqrt(dot(y, y))
+
+    z.values ./= sqrt(dot(z, z))
+    z.values .-= dot(z, x) * x.values
+    z.values ./= sqrt(dot(z, z))
+    z.values .-= dot(z, y) * y.values
+    z.values ./= sqrt(dot(z, z))
+
+    println("Eigenvalue accuracy:")
+    x̃ = SpinTensor(x)
+    ỹ = SpinTensor(y)
+    z̃ = SpinTensor(z)
+    println("    x: $(norm(L*tensor2vector(x̃)+2*tensor2vector(x̃)))")
+    println("    y: $(norm(L*tensor2vector(ỹ)+2*tensor2vector(ỹ)))")
+    println("    z: $(norm(L*tensor2vector(z̃)+2*tensor2vector(z̃)))")
+
+    return x, y, z
+end
+
+function test_ricci(; lmax::Int=30, visualize::Bool=false)
+    xform = identity
+
+    g = make_g(xform, lmax)
+    check_g(xform, g)
+
+    # Project g_ab into our function space
+    g̃ = SpinTensor(g)
+    g̃ = filter_modes(g̃)
+    g = Tensor(g̃)
+    g = make_real(g)
+    g = make_symmetric(g)
+    check_g(xform, g)
+
+    # gu^ab
+    gu = make_gu(g)
+    gu = make_real(gu)
+    gu = make_symmetric(gu)
+
+    # dg_abc = g_ab,c
+    g̃ = SpinTensor(g)
+    dg̃ = tensor_gradient(g̃)
+    dg̃ = filter_modes(dg̃)
+    dg = Tensor(dg̃)
+    dg = make_real(dg)
+    dg = make_symmetric12(dg)
+    # TODO: Check dg
+
+    # Γ^a_bc = g^ad (g_dc,b + g_bd,c - g_bc,d) / 2
+    Γ = make_Γ(gu, dg)
+    # TODO: Check Γ^a_bc
+
+    Rm = make_Riemann(g, gu, Γ)
+    Rm = make_real(Rm)
+    Rm = make_riemann_symmetry(Rm)
+    # TODO: Check Rm_abcd
+
+    Rc = make_Ricci(gu, Rm)
+    Rc = make_real(Rc)
+    Rc = make_symmetric(Rc)
+    # TODO: Check Rc_ab
+
+    Rsc = make_Rsc(gu, Rc)
+    Rsc = make_real(Rsc)
+
+    if visualize
+        plt = plot(; aspect_ratio=1, legend=false)
+        heatmap!(
+            plt,
+            ash_phis(lmax),
+            ash_thetas(lmax),
+            real(transpose(map(x -> x[], ash_grid_as_phi_theta(Rsc.values))));
+            colorbar=true,
+            clims=(1.5, 2.5),
+            title="Rsc",
+        )
+        display(plt)
+    end
+
+    return nothing
+end
+
+function main(; lmax::Int=30, visualize::Bool=false)
     # g = make_g(identity, lmax)
     # g = make_g(xform_3d, lmax)
     g = invent_metric(lmax)
@@ -884,6 +1186,16 @@ function main(; lmax::Int=40, visualize::Bool=false)
     g′ = Tensor{2}([SMatrix{2,2}(ϕ[] * g[a, b] for a in 1:2, b in 1:2) for (ϕ, g) in zip(ϕ.values, g.values)], lmax)
     Rsc′ = calc_ricci(g′)
     println("Rsc′:   min: ", minimum(real(map(x -> x[], Rsc′.values))), "   max: ", maximum(real(map(x -> x[], Rsc′.values))))
+
+    # Rescale sphere
+    # Why doesn't the Ricci flow do this automatically?
+    avg_Rsc′ = (minimum(real(map(x -> x[], Rsc′.values))) +  maximum(real(map(x -> x[], Rsc′.values)))) / 2
+    ϕ.values .*= avg_Rsc′/2
+    g′ = Tensor{2}([SMatrix{2,2}(ϕ[] * g[a, b] for a in 1:2, b in 1:2) for (ϕ, g) in zip(ϕ.values, g.values)], lmax)
+    Rsc′ = calc_ricci(g′)
+    println("Rsc′:   min: ", minimum(real(map(x -> x[], Rsc′.values))), "   max: ", maximum(real(map(x -> x[], Rsc′.values))))
+
+    x, y, z = find_coordinates(g, ϕ)
 
     if visualize
         plt = plot(; aspect_ratio=1, legend=false)
@@ -898,14 +1210,42 @@ function main(; lmax::Int=40, visualize::Bool=false)
         #     title="Rsc",
         # )
 
+        # heatmap!(
+        #     plt,
+        #     ash_phis(lmax),
+        #     ash_thetas(lmax),
+        #     real(transpose(map(x -> x[], ash_grid_as_phi_theta(ϕ.values))));
+        #     colorbar=true,
+        #     clims=(0.9, 1.1),
+        #     title="ϕ",
+        # )
+
         heatmap!(
             plt,
             ash_phis(lmax),
             ash_thetas(lmax),
-            real(transpose(map(x -> x[], ash_grid_as_phi_theta(ϕ.values))));
+            real(transpose(map(x -> x[], ash_grid_as_phi_theta(x.values))));
             colorbar=true,
-            clims=(0.9, 1.1),
-            title="ϕ",
+            clims=(-1.1, +1.1),
+            title="x",
+        )
+        heatmap!(
+            plt,
+            ash_phis(lmax),
+            ash_thetas(lmax),
+            real(transpose(map(x -> x[], ash_grid_as_phi_theta(y.values))));
+            colorbar=true,
+            clims=(-1.1, +1.1),
+            title="y",
+        )
+        heatmap!(
+            plt,
+            ash_phis(lmax),
+            ash_thetas(lmax),
+            real(transpose(map(x -> x[], ash_grid_as_phi_theta(z.values))));
+            colorbar=true,
+            clims=(-1.1, +1.1),
+            title="z",
         )
 
         display(plt)
