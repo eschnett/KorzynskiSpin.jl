@@ -85,7 +85,7 @@ function impose_symmetry(f, t::Tensor{D}; check::Bool=true) where {D}
     @assert norm(t.values, Inf) < Inf
     if check
         if !(norm(t.values - f.(t.values), Inf) ≤ atol(t.lmax))
-            @show t.values
+            @show norm(t.values, Inf)
         end
         @assert norm(t.values - f.(t.values), Inf) ≤ atol(t.lmax)
     end
@@ -1140,9 +1140,9 @@ function find_coordinates(g₀::Tensor{2}, ϕ::Tensor{0})
     # @show norm(imag.(map(x -> x[], x.values)))
     # @show norm(imag.(map(x -> x[], y.values)))
     # @show norm(imag.(map(x -> x[], z.values)))
-    x = make_real(x)
-    y = make_real(y)
-    z = make_real(z)
+    x = make_real(x; check=false)
+    y = make_real(y; check=false)
+    z = make_real(z; check=false)
 
     # Orthonormalize
     V = Tensor{0}([Scalar(sqrt(det(g))) for g in g.values], lmax)
@@ -1212,10 +1212,21 @@ end
 ################################################################################
 
 function main(; lmax::Int=30, visualize::Bool=false)
+    sz = ash_grid_size(lmax)
+
     # Set up the metric
     # g = make_g(identity, lmax)
     # g = make_g(xform_3d, lmax)
-    g = invent_metric(lmax)
+    # g = invent_metric(lmax)
+    g = Tensor{2}(
+        [
+            begin
+                θ, ϕ = ash_point_coord(ij, lmax)
+                q, ω = kerr_schild_omega(θ, ϕ)
+                SMatrix{2,2}(q[3, 3], q[3, 4] / sin(θ), q[4, 3] / sin(θ), q[4, 4] / sin(θ)^2)
+            end for ij in CartesianIndices(sz)
+        ], lmax
+    )
     Rsc = calc_ricci(g)
     println("Rsc:   min: ", minimum(real(map(x -> x[], Rsc.values))), "   max: ", maximum(real(map(x -> x[], Rsc.values))))
 
@@ -1275,7 +1286,6 @@ function main(; lmax::Int=30, visualize::Bool=false)
     ξz = dz
 
     # Set up rotation one-form ω
-    sz = ash_grid_size(lmax)
     ω = Tensor{1}([
         begin
             θ, ϕ = ash_point_coord(ij, lmax)
@@ -1285,6 +1295,74 @@ function main(; lmax::Int=30, visualize::Bool=false)
     ], lmax)
 
     # Calculate spin integrals
+    int(f::Tensor{0}) = sqrt(4π) * real(SpinTensor(f).coeffs[][ash_mode_index(0, 0, 0, lmax)])
+    V_kernel = Tensor{0}([Scalar(sqrt(det(g))) for (ω, ϕx, g) in zip(ω.values, ϕx.values, g.values)], lmax)
+    Jx_kernel = Tensor{0}(
+        [Scalar(sum(ω[a] * ϕx[a] for a in 1:2) * sqrt(det(g))) for (ω, ϕx, g) in zip(ω.values, ϕx.values, g.values)], lmax
+    )
+    Jy_kernel = Tensor{0}(
+        [Scalar(sum(ω[a] * ϕy[a] for a in 1:2) * sqrt(det(g))) for (ω, ϕy, g) in zip(ω.values, ϕy.values, g.values)], lmax
+    )
+    Jz_kernel = Tensor{0}(
+        [Scalar(sum(ω[a] * ϕz[a] for a in 1:2) * sqrt(det(g))) for (ω, ϕz, g) in zip(ω.values, ϕz.values, g.values)], lmax
+    )
+    Kx_kernel = Tensor{0}(
+        [Scalar(sum(ω[a] * ξx[a] for a in 1:2) * sqrt(det(g))) for (ω, ξx, g) in zip(ω.values, ξx.values, g.values)], lmax
+    )
+    Ky_kernel = Tensor{0}(
+        [Scalar(sum(ω[a] * ξy[a] for a in 1:2) * sqrt(det(g))) for (ω, ξy, g) in zip(ω.values, ξy.values, g.values)], lmax
+    )
+    Kz_kernel = Tensor{0}(
+        [Scalar(sum(ω[a] * ξz[a] for a in 1:2) * sqrt(det(g))) for (ω, ξz, g) in zip(ω.values, ξz.values, g.values)], lmax
+    )
+    V = int(V_kernel)
+    Jx = -1 / 8π * int(Jx_kernel)
+    Jy = -1 / 8π * int(Jy_kernel)
+    Jz = -1 / 8π * int(Jz_kernel)
+    Kx = -1 / 8π * int(Kx_kernel)
+    Ky = -1 / 8π * int(Ky_kernel)
+    Kz = -1 / 8π * int(Kz_kernel)
+    J = SVector(Jx, Jy, Jz)
+    K = SVector(Kx, Ky, Kz)
+    absJ = norm(J)
+    absK = norm(K)
+    @show V / 4π Jx Jy Jz Kx Ky Kz absJ absK
+    J2 = J ⋅ J
+    K2 = K ⋅ K
+    A = J2 - K2
+    B = J ⋅ K
+    C = norm(J × K)
+    @show J2 K2 A B C
+    if J2 ≥ eps() && K2 ≥ eps() && C ≤ sqrt(eps()) && !(abs(A) ≤ sqrt(eps()) && abs(B) ≤ sqrt(eps()))
+        Q = (J2 + K2) / C
+        @show Q
+        β1 = Q - sqrt(Q^2 - 4) / 2
+        β2 = Q + sqrt(Q^2 - 4) / 2
+        @show β1 β2
+        β = if 0 < β1 < 1
+            β1
+        elseif 0 < β2 < 1
+            β2
+        else
+            error("β")
+        end
+        @show β
+        βvec = β * (J × K) / C
+    end
+    @assert C ≤ sqrt(eps())
+    J = sqrt(J2)
+    @show J
+    if A^2 + B^2 > sqrt(eps())
+        if J2 > sqrt(eps())
+            # Calculate spin from J
+            ϕ = (Jx * ϕx + Jy * ϕy + Jz * ϕz) / J
+        else
+            # Calculate spin from K
+            ϕ = (Kx * ξx + Ky * ξy + Kz * ξz) / K
+        end
+    end
+    J′ = sqrt((A + sqrt(A^2 + B^2)) / 2)
+    @show J′
 
     if visualize
         plt = plot(; aspect_ratio=1, legend=false)
