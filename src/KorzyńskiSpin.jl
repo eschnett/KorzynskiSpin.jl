@@ -8,6 +8,8 @@ using LinearOperators
 using StaticArrays
 using StatsPlots
 
+include("kerr_schild.jl")
+
 ################################################################################
 # General helpers
 
@@ -472,6 +474,68 @@ end
 
 function make_Rsc(gu::Tensor{2}, Rc::Tensor{2})
     return Tensor{0}([Scalar(sum(gu[a, b] * Rc[a, b] for a in 1:2, b in 1:2)) for (gu, Rc) in zip(gu.values, Rc.values)], gu.lmax)
+end
+
+function test_ricci(; lmax::Int=30, visualize::Bool=false)
+    xform = identity
+
+    g = make_g(xform, lmax)
+    check_g(xform, g)
+
+    # Project g_ab into our function space
+    g̃ = SpinTensor(g)
+    g̃ = filter_modes(g̃)
+    g = Tensor(g̃)
+    g = make_real(g)
+    g = make_symmetric(g)
+    check_g(xform, g)
+
+    # gu^ab
+    gu = make_gu(g)
+    gu = make_real(gu)
+    gu = make_symmetric(gu)
+
+    # dg_abc = g_ab,c
+    g̃ = SpinTensor(g)
+    dg̃ = tensor_gradient(g̃)
+    dg̃ = filter_modes(dg̃)
+    dg = Tensor(dg̃)
+    dg = make_real(dg)
+    dg = make_symmetric12(dg)
+    # TODO: Check dg
+
+    # Γ^a_bc = g^ad (g_dc,b + g_bd,c - g_bc,d) / 2
+    Γ = make_Γ(gu, dg)
+    # TODO: Check Γ^a_bc
+
+    Rm = make_Riemann(g, gu, Γ)
+    Rm = make_real(Rm)
+    Rm = make_riemann_symmetry(Rm)
+    # TODO: Check Rm_abcd
+
+    Rc = make_Ricci(gu, Rm)
+    Rc = make_real(Rc)
+    Rc = make_symmetric(Rc)
+    # TODO: Check Rc_ab
+
+    Rsc = make_Rsc(gu, Rc)
+    Rsc = make_real(Rsc)
+
+    if visualize
+        plt = plot(; aspect_ratio=1, legend=false)
+        heatmap!(
+            plt,
+            ash_phis(lmax),
+            ash_thetas(lmax),
+            real(transpose(map(x -> x[], ash_grid_as_phi_theta(Rsc.values))));
+            colorbar=true,
+            clims=(1.5, 2.5),
+            title="Rsc",
+        )
+        display(plt)
+    end
+
+    return nothing
 end
 
 ################################################################################
@@ -1111,75 +1175,51 @@ function find_coordinates(g₀::Tensor{2}, ϕ::Tensor{0})
     return x, y, z
 end
 
-function test_ricci(; lmax::Int=30, visualize::Bool=false)
-    xform = identity
+function kerr_schild_omega(θ, ϕ)
+    # Cook, sec. 3.3.1
+    M = 1
+    a = 0.5
+    Q = 0
+    r_EH = M + sqrt(M^2 - a^2 - Q^2)
+    # @show M a Q r_EH
+    x = SVector(0, r_EH, θ, ϕ)
+    g, l, k = null_normals(M, a, Q, x)
+    gu = inv(g)
+    # Christoffel symbols
+    dg = SArray{Tuple{4,4,4}}(ForwardDiff.jacobian(x -> null_normals(M, a, Q, x)[1], x)...)
+    Γ = SArray{Tuple{4,4,4}}(
+        sum(gu[a, d] * (dg[d, c, b] + dg[b, d, c] - dg[b, c, d]) / 2 for d in 1:4) for a in 1:4, b in 1:4, c in 1:4
+    )
+    # Gradients of null normals
+    dl = SMatrix{4,4}(ForwardDiff.jacobian(x -> null_normals(M, a, Q, x)[2], x)...)
+    Dl = SMatrix{4,4}(dl[a, b] - sum(Γ[c, a, b] * l[c] for c in 1:4) for a in 1:4, b in 1:4)
 
-    g = make_g(xform, lmax)
-    check_g(xform, g)
+    # 2-metric on horizon
+    q = SMatrix{4,4}(g[a, b] + l[a] * k[b] + k[a] * l[b] for a in 1:4, b in 1:4)
+    # @show chop(norm(q' - q, Inf))
+    q = (q + q') / 2
+    # @show chop.(eigvals(q))
 
-    # Project g_ab into our function space
-    g̃ = SpinTensor(g)
-    g̃ = filter_modes(g̃)
-    g = Tensor(g̃)
-    g = make_real(g)
-    g = make_symmetric(g)
-    check_g(xform, g)
+    # rotation one-form ω
+    ω = SVector{4}(-sum(q[a, b] * gu[b, c] * Dl[c, d] * gu[d, e] * k[e] for b in 1:4, c in 1:4, d in 1:4, e in 1:4) for a in 1:4)
+    # @show chop.(ω)
+    ω2 = ω' * gu * ω
+    # @show chop(ω2)
 
-    # gu^ab
-    gu = make_gu(g)
-    gu = make_real(gu)
-    gu = make_symmetric(gu)
-
-    # dg_abc = g_ab,c
-    g̃ = SpinTensor(g)
-    dg̃ = tensor_gradient(g̃)
-    dg̃ = filter_modes(dg̃)
-    dg = Tensor(dg̃)
-    dg = make_real(dg)
-    dg = make_symmetric12(dg)
-    # TODO: Check dg
-
-    # Γ^a_bc = g^ad (g_dc,b + g_bd,c - g_bc,d) / 2
-    Γ = make_Γ(gu, dg)
-    # TODO: Check Γ^a_bc
-
-    Rm = make_Riemann(g, gu, Γ)
-    Rm = make_real(Rm)
-    Rm = make_riemann_symmetry(Rm)
-    # TODO: Check Rm_abcd
-
-    Rc = make_Ricci(gu, Rm)
-    Rc = make_real(Rc)
-    Rc = make_symmetric(Rc)
-    # TODO: Check Rc_ab
-
-    Rsc = make_Rsc(gu, Rc)
-    Rsc = make_real(Rsc)
-
-    if visualize
-        plt = plot(; aspect_ratio=1, legend=false)
-        heatmap!(
-            plt,
-            ash_phis(lmax),
-            ash_thetas(lmax),
-            real(transpose(map(x -> x[], ash_grid_as_phi_theta(Rsc.values))));
-            colorbar=true,
-            clims=(1.5, 2.5),
-            title="Rsc",
-        )
-        display(plt)
-    end
-
-    return nothing
+    return q, ω
 end
 
+################################################################################
+
 function main(; lmax::Int=30, visualize::Bool=false)
+    # Set up the metric
     # g = make_g(identity, lmax)
     # g = make_g(xform_3d, lmax)
     g = invent_metric(lmax)
     Rsc = calc_ricci(g)
     println("Rsc:   min: ", minimum(real(map(x -> x[], Rsc.values))), "   max: ", maximum(real(map(x -> x[], Rsc.values))))
 
+    # Find conformal transformation
     ϕ = ricci_flow(g)
     ϕ_min, ϕ_max = extrema(real(map(x -> x[], ϕ.values)))
     println("ϕ:   min: ", ϕ_min, "   max: ", ϕ_max)
@@ -1189,13 +1229,62 @@ function main(; lmax::Int=30, visualize::Bool=false)
 
     # Rescale sphere
     # Why doesn't the Ricci flow do this automatically?
-    avg_Rsc′ = (minimum(real(map(x -> x[], Rsc′.values))) +  maximum(real(map(x -> x[], Rsc′.values)))) / 2
-    ϕ.values .*= avg_Rsc′/2
+    avg_Rsc′ = (minimum(real(map(x -> x[], Rsc′.values))) + maximum(real(map(x -> x[], Rsc′.values)))) / 2
+    ϕ.values .*= avg_Rsc′ / 2
     g′ = Tensor{2}([SMatrix{2,2}(ϕ[] * g[a, b] for a in 1:2, b in 1:2) for (ϕ, g) in zip(ϕ.values, g.values)], lmax)
     Rsc′ = calc_ricci(g′)
     println("Rsc′:   min: ", minimum(real(map(x -> x[], Rsc′.values))), "   max: ", maximum(real(map(x -> x[], Rsc′.values))))
 
+    # Find good coordinates
     x, y, z = find_coordinates(g, ϕ)
+    xs = [x, y, z]
+
+    # Calculate vector fields ϕᵢ and ξᵢ
+    delta = SMatrix{2,2}(i == j for i in 1:2, j in 1:2)
+    epsilon = SMatrix{2,2}(if (i, j) == (1, 2)
+        +1
+    elseif (i, j) == (2, 1)
+        -1
+    else
+        0
+    end for i in 1:2, j in 1:2)
+    delta3 = SMatrix{3,3}(i == j for i in 1:3, j in 1:3)
+    epsilon3 = SArray{Tuple{3,3,3}}(if (i, j, k) ∈ ((1, 2, 3), (2, 3, 1), (3, 1, 2))
+        +1
+    elseif (i, j, k) ∈ ((1, 3, 2), (2, 1, 3), (3, 2, 1))
+        -1
+    else
+        0
+    end for i in 1:3, j in 1:3, k in 1:3)
+    # ϕᵢ = curl xᵢ
+    x̃ = SpinTensor(x)
+    ỹ = SpinTensor(y)
+    z̃ = SpinTensor(z)
+    dx̃ = tensor_gradient(x̃)
+    dỹ = tensor_gradient(ỹ)
+    dz̃ = tensor_gradient(z̃)
+    dx = Tensor(dx̃)
+    dy = Tensor(dỹ)
+    dz = Tensor(dz̃)
+    ϕx = Tensor{1}([SVector{2}(sum(epsilon[a, b] * dx[b] for b in 1:2) for a in 1:2) for dx in dx.values], lmax)
+    ϕy = Tensor{1}([SVector{2}(sum(epsilon[a, b] * dy[b] for b in 1:2) for a in 1:2) for dy in dy.values], lmax)
+    ϕz = Tensor{1}([SVector{2}(sum(epsilon[a, b] * dz[b] for b in 1:2) for a in 1:2) for dz in dz.values], lmax)
+    # ξᵢ = grad xᵢ
+    ξx = dx
+    ξy = dy
+    ξz = dz
+
+    # Set up rotation one-form ω
+    sz = ash_grid_size(lmax)
+    ω = Tensor{1}([
+        begin
+            θ, ϕ = ash_point_coord(ij, lmax)
+            q, ω = kerr_schild_omega(θ, ϕ)
+            SVector(ω[3], ω[4])
+        end for ij in CartesianIndices(sz)
+    ], lmax)
+
+    # Calculate spin integrals
 
     if visualize
         plt = plot(; aspect_ratio=1, legend=false)
