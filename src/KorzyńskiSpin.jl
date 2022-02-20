@@ -67,6 +67,14 @@ function nmodes2lmax(nmodes::Int)
     return lmax0
 end
 
+function mode_norm(t::SpinTensor{1}, l::Int)
+    lmax = t.lmax
+    @assert 0 ≤ l ≤ lmax
+    norms = real(eltype(t))[]
+    l ≥ 1 && push!(norms, norm([t.coeffs[1][ash_mode_index(+1, l, m, lmax)] for m in (-l):l]))
+    l ≥ 1 && push!(norms, norm([t.coeffs[2][ash_mode_index(-1, l, m, lmax)] for m in (-l):l]))
+    return norm(norms)
+end
 function mode_norm(t::SpinTensor{2}, l::Int)
     lmax = t.lmax
     @assert 0 ≤ l ≤ lmax
@@ -1152,17 +1160,25 @@ function find_coordinates(g₀::Tensor{2}, ϕ::Tensor{0})
         return int(Tensor{0}([Scalar(sqrt(det(g)) * x[] * y[]) for (g, x, y) in zip(g.values, x.values, y.values)], lmax))
     end
 
+    # Orthonormalize with regard to conformal metric
+
     x.values ./= sqrt(dot(x, x))
 
-    y.values ./= sqrt(dot(y, y))
+    # y.values ./= sqrt(dot(y, y))
     y.values .-= dot(y, x) * x.values
     y.values ./= sqrt(dot(y, y))
 
-    z.values ./= sqrt(dot(z, z))
+    # z.values ./= sqrt(dot(z, z))
     z.values .-= dot(z, x) * x.values
-    z.values ./= sqrt(dot(z, z))
+    # z.values ./= sqrt(dot(z, z))
     z.values .-= dot(z, y) * y.values
     z.values ./= sqrt(dot(z, z))
+
+    # Scale
+
+    x.values ./= sqrt(3)
+    y.values ./= sqrt(3)
+    z.values ./= sqrt(3)
 
     println("Eigenvalue accuracy:")
     x̃ = SpinTensor(x)
@@ -1201,10 +1217,15 @@ function kerr_schild_omega(θ, ϕ)
     # @show chop.(eigvals(q))
 
     # rotation one-form ω
-    ω = SVector{4}(-sum(q[a, b] * gu[b, c] * Dl[c, d] * gu[d, e] * k[e] for b in 1:4, c in 1:4, d in 1:4, e in 1:4) for a in 1:4)
+    ω = SVector{4}(sum(-q[a, b] * gu[b, c] * Dl[c, d] * gu[d, e] * k[e] for b in 1:4, c in 1:4, d in 1:4, e in 1:4) for a in 1:4)
     # @show chop.(ω)
     ω2 = ω' * gu * ω
     # @show chop(ω2)
+
+    # isq = SMatrix{4,4}(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 / sin(θ))
+    # 
+    # q = isq * q * isq'
+    # ω = isq * ω
 
     return q, ω
 end
@@ -1248,7 +1269,18 @@ function main(; lmax::Int=30, visualize::Bool=false)
 
     # Find good coordinates
     x, y, z = find_coordinates(g, ϕ)
+    # @show extrema(map(x -> Real(x[]), x.values))
+    # @show extrema(map(x -> Real(x[]), y.values))
+    # @show extrema(map(x -> Real(x[]), z.values))
+    # x.values ./= norm(x.values, Inf)
+    # y.values ./= norm(y.values, Inf)
+    # z.values ./= norm(z.values, Inf)
     xs = [x, y, z]
+
+    g = g′
+    gu = make_gu(g)
+    gu = make_real(gu)
+    gu = make_symmetric(gu)
 
     # Calculate vector fields ϕᵢ and ξᵢ
     delta = SMatrix{2,2}(i == j for i in 1:2, j in 1:2)
@@ -1267,7 +1299,6 @@ function main(; lmax::Int=30, visualize::Bool=false)
     else
         0
     end for i in 1:3, j in 1:3, k in 1:3)
-    # ϕᵢ = curl xᵢ
     x̃ = SpinTensor(x)
     ỹ = SpinTensor(y)
     z̃ = SpinTensor(z)
@@ -1277,56 +1308,121 @@ function main(; lmax::Int=30, visualize::Bool=false)
     dx = Tensor(dx̃)
     dy = Tensor(dỹ)
     dz = Tensor(dz̃)
-    ϕx = Tensor{1}([SVector{2}(sum(epsilon[a, b] * dx[b] for b in 1:2) for a in 1:2) for dx in dx.values], lmax)
-    ϕy = Tensor{1}([SVector{2}(sum(epsilon[a, b] * dy[b] for b in 1:2) for a in 1:2) for dy in dy.values], lmax)
-    ϕz = Tensor{1}([SVector{2}(sum(epsilon[a, b] * dz[b] for b in 1:2) for a in 1:2) for dz in dz.values], lmax)
+    # ϕᵢ = curl xᵢ
+    ϕx = Tensor{1}(
+        [
+            begin
+                #TODO
+                # θ, ϕ = ash_point_coord(ij, lmax)
+                # epsilon = SMatrix{2,2}(0, -1 * sin(θ), +1 * sin(θ), 0)
+                SVector{2}(sum(g[a, b] * epsilon[b, c] * dx[c] for b in 1:2, c in 1:2) for a in 1:2)
+                # SVector{2,Complex{Float64}}(0, 1)
+            end for (ij, g, dx) in zip(CartesianIndices(sz), g.values, dx.values)
+        ],
+        lmax,
+    )
+    ϕy = Tensor{1}(
+        [
+            SVector{2}(sum(g[a, b] * epsilon[b, c] * dy[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            (g, dy) in zip(g.values, dy.values)
+        ],
+        lmax,
+    )
+    ϕz = Tensor{1}([
+        begin
+            #TODO
+            # θ, ϕ = ash_point_coord(ij, lmax)
+            # epsilon = SMatrix{2,2}(0, -1 * sin(θ), +1 * sin(θ), 0)
+            # SVector{2}(sum(g[a, b] * epsilon[b, c] * dz[c] for b in 1:2, c in 1:2) for a in 1:2)
+            SVector{2,Complex{Float64}}(0, 1)
+        end for (ij, g, dz) in zip(CartesianIndices(sz), g.values, dz.values)
+    ], lmax)
     # ξᵢ = grad xᵢ
     ξx = dx
     ξy = dy
     ξz = dz
+
+    norms(t::SpinTensor{1}) = [mode_norm(t, l) for l in 1:10]
+    @show chop.(norms(SpinTensor(ϕx)))
+    @show chop.(norms(SpinTensor(ϕy)))
+    @show chop.(norms(SpinTensor(ϕz)))
+    @show chop.(norms(SpinTensor(ξx)))
+    @show chop.(norms(SpinTensor(ξy)))
+    @show chop.(norms(SpinTensor(ξz)))
 
     # Set up rotation one-form ω
     ω = Tensor{1}([
         begin
             θ, ϕ = ash_point_coord(ij, lmax)
             q, ω = kerr_schild_omega(θ, ϕ)
-            SVector(ω[3], ω[4])
+            # @assert ω[1] + 1 ≈ 1
+            # @assert ω[2] + 1 ≈ 1
+            SVector(ω[3], ω[4] / sin(θ))
+            # SVector(ωu[3], ωu[4] * sin(θ))
         end for ij in CartesianIndices(sz)
     ], lmax)
 
+    ω lives on the horizon; need to project it to round sphere?
+        or need to project ϕ, ξ to horizon?
+
     # Calculate spin integrals
     int(f::Tensor{0}) = sqrt(4π) * real(SpinTensor(f).coeffs[][ash_mode_index(0, 0, 0, lmax)])
-    V_kernel = Tensor{0}([Scalar(sqrt(det(g))) for (ω, ϕx, g) in zip(ω.values, ϕx.values, g.values)], lmax)
+    V_kernel = Tensor{0}([Scalar(sqrt(det(g))) for g in g.values], lmax)
     Jx_kernel = Tensor{0}(
-        [Scalar(sum(ω[a] * ϕx[a] for a in 1:2) * sqrt(det(g))) for (ω, ϕx, g) in zip(ω.values, ϕx.values, g.values)], lmax
+        [
+            Scalar(sum(gu[a, b] * ω[a] * ϕx[b] for a in 1:2, b in 1:2) * sqrt(det(g))) for
+            (ω, ϕx, g, gu) in zip(ω.values, ϕx.values, g.values, gu.values)
+        ],
+        lmax,
     )
     Jy_kernel = Tensor{0}(
-        [Scalar(sum(ω[a] * ϕy[a] for a in 1:2) * sqrt(det(g))) for (ω, ϕy, g) in zip(ω.values, ϕy.values, g.values)], lmax
+        [
+            Scalar(sum(gu[a, b] * ω[a] * ϕy[b] for a in 1:2, b in 1:2) * sqrt(det(g))) for
+            (ω, ϕy, g, gu) in zip(ω.values, ϕy.values, g.values, gu.values)
+        ],
+        lmax,
     )
     Jz_kernel = Tensor{0}(
-        [Scalar(sum(ω[a] * ϕz[a] for a in 1:2) * sqrt(det(g))) for (ω, ϕz, g) in zip(ω.values, ϕz.values, g.values)], lmax
+        [
+            Scalar(sum(gu[a, b] * ω[a] * ϕz[b] for a in 1:2, b in 1:2) * sqrt(det(g))) for
+            (ω, ϕz, g, gu) in zip(ω.values, ϕz.values, g.values, gu.values)
+        ],
+        lmax,
     )
     Kx_kernel = Tensor{0}(
-        [Scalar(sum(ω[a] * ξx[a] for a in 1:2) * sqrt(det(g))) for (ω, ξx, g) in zip(ω.values, ξx.values, g.values)], lmax
+        [
+            Scalar(sum(gu[a, b] * ω[a] * ξx[b] for a in 1:2, b in 1:2) * sqrt(det(g))) for
+            (ω, ξx, g, gu) in zip(ω.values, ξx.values, g.values, gu.values)
+        ],
+        lmax,
     )
     Ky_kernel = Tensor{0}(
-        [Scalar(sum(ω[a] * ξy[a] for a in 1:2) * sqrt(det(g))) for (ω, ξy, g) in zip(ω.values, ξy.values, g.values)], lmax
+        [
+            Scalar(sum(gu[a, b] * ω[a] * ξy[b] for a in 1:2, b in 1:2) * sqrt(det(g))) for
+            (ω, ξy, g, gu) in zip(ω.values, ξy.values, g.values, gu.values)
+        ],
+        lmax,
     )
     Kz_kernel = Tensor{0}(
-        [Scalar(sum(ω[a] * ξz[a] for a in 1:2) * sqrt(det(g))) for (ω, ξz, g) in zip(ω.values, ξz.values, g.values)], lmax
+        [
+            Scalar(sum(gu[a, b] * ω[a] * ξz[b] for a in 1:2, b in 1:2) * sqrt(det(g))) for
+            (ω, ξz, g, gu) in zip(ω.values, ξz.values, g.values, gu.values)
+        ],
+        lmax,
     )
     V = int(V_kernel)
-    Jx = -1 / 8π * int(Jx_kernel)
-    Jy = -1 / 8π * int(Jy_kernel)
-    Jz = -1 / 8π * int(Jz_kernel)
-    Kx = -1 / 8π * int(Kx_kernel)
-    Ky = -1 / 8π * int(Ky_kernel)
-    Kz = -1 / 8π * int(Kz_kernel)
+    @show V / 4π
+    Jx = -1 / 8π * int(Jx_kernel) / (V / 4π)
+    Jy = -1 / 8π * int(Jy_kernel) / (V / 4π)
+    Jz = -1 / 8π * int(Jz_kernel) / (V / 4π)
+    Kx = -1 / 8π * int(Kx_kernel) / (V / 4π)
+    Ky = -1 / 8π * int(Ky_kernel) / (V / 4π)
+    Kz = -1 / 8π * int(Kz_kernel) / (V / 4π)
     J = SVector(Jx, Jy, Jz)
     K = SVector(Kx, Ky, Kz)
     absJ = norm(J)
     absK = norm(K)
-    @show V / 4π Jx Jy Jz Kx Ky Kz absJ absK
+    @show Jx Jy Jz Kx Ky Kz absJ absK
     J2 = J ⋅ J
     K2 = K ⋅ K
     A = J2 - K2
@@ -1387,33 +1483,35 @@ function main(; lmax::Int=30, visualize::Bool=false)
         #     title="ϕ",
         # )
 
+        # heatmap!(
+        #     plt,
+        #     ash_phis(lmax),
+        #     ash_thetas(lmax),
+        #     real(transpose(map(x -> x[], ash_grid_as_phi_theta(z.values))));
+        #     colorbar=true,
+        #     clims=(-1.1, +1.1),
+        #     title="z",
+        # )
+
         heatmap!(
             plt,
             ash_phis(lmax),
             ash_thetas(lmax),
-            real(transpose(map(x -> x[], ash_grid_as_phi_theta(x.values))));
+            real(transpose(map(x -> x[1], ash_grid_as_phi_theta(ϕz.values))));
             colorbar=true,
-            clims=(-1.1, +1.1),
-            title="x",
+            # clims=(-1.1, +1.1),
+            title="ϕz",
         )
-        heatmap!(
-            plt,
-            ash_phis(lmax),
-            ash_thetas(lmax),
-            real(transpose(map(x -> x[], ash_grid_as_phi_theta(y.values))));
-            colorbar=true,
-            clims=(-1.1, +1.1),
-            title="y",
-        )
-        heatmap!(
-            plt,
-            ash_phis(lmax),
-            ash_thetas(lmax),
-            real(transpose(map(x -> x[], ash_grid_as_phi_theta(z.values))));
-            colorbar=true,
-            clims=(-1.1, +1.1),
-            title="z",
-        )
+
+        # heatmap!(
+        #     plt,
+        #     ash_phis(lmax),
+        #     ash_thetas(lmax),
+        #     real(transpose(map(x -> x[], ash_grid_as_phi_theta(Jz_kernel.values))));
+        #     colorbar=true,
+        #     # clims=(-1.1, +1.1),
+        #     title="Jz",
+        # )
 
         display(plt)
     end

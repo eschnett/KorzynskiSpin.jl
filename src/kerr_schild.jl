@@ -30,11 +30,14 @@ function kerr_schild(M, a, Q, x::SVector{4})
     g0i = γ * β
     gij = γ
 
+    # sq = sin(θ)
+    sq = 1
+
     g = SMatrix{4,4}(
-        (g00, g0i[1], g0i[2], g0i[3])...,
-        (g0i[1], gij[1, 1], gij[1, 2], gij[1, 3])...,
-        (g0i[2], gij[2, 1], gij[2, 2], gij[2, 3])...,
-        (g0i[3], gij[3, 1], gij[3, 2], gij[3, 3])...,
+        (g00, g0i[1], g0i[2], g0i[3] / sq)...,
+        (g0i[1], gij[1, 1], gij[1, 2], gij[1, 3] / sq)...,
+        (g0i[2], gij[2, 1], gij[2, 2], gij[2, 3] / sq)...,
+        (g0i[3] / sq, gij[3, 1] / sq, gij[3, 2] / sq, gij[3, 3] / sq^2)...,
     )
 
     return g
