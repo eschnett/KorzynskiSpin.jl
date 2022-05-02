@@ -5,6 +5,7 @@ using Arpack
 using ForwardDiff
 using LinearAlgebra
 using LinearOperators
+using Printf
 using StaticArrays
 using StatsPlots
 
@@ -37,7 +38,10 @@ atol(lmax) = 1.0e+6 * max(exp(-lmax), lmax * eps())
 ################################################################################
 # Local tensor helpers
 
+# δ^a_b
 const delta = SMatrix{2,2}(i == j for i in 1:2, j in 1:2)
+# ϵ^ab
+# This quantity depends on θ when projected onto the dyad; it cannot be a global constant
 const epsilon = SMatrix{2,2}(if (i, j) == (1, 2)
     +1
 elseif (i, j) == (2, 1)
@@ -87,6 +91,13 @@ function nmodes2lmax(nmodes::Int)
     return lmax0
 end
 
+function mode_norm(t::SpinTensor{0}, l::Int)
+    lmax = t.lmax
+    @assert 0 ≤ l ≤ lmax
+    norms = real(eltype(t))[]
+    push!(norms, norm([t.coeffs[][ash_mode_index(0, l, m, lmax)] for m in (-l):l]))
+    return norm(norms)
+end
 function mode_norm(t::SpinTensor{1}, l::Int)
     lmax = t.lmax
     @assert 0 ≤ l ≤ lmax
@@ -292,6 +303,8 @@ function check_g(xform, g::Tensor{2})
     end
     return nothing
 end
+
+make_detg(g::Tensor{2}) = Tensor{0}([det(g) for g in g.values], g.lmax)
 
 make_gu(g::Tensor{2}) = Tensor{2}([inv(g) for g in g.values], g.lmax)
 
@@ -736,7 +749,7 @@ function ricci_flow(g₀::Tensor{2})
     # # ϕ = make_real(ϕ)
 
     Δt = 0.25 / (lmax + 1)^2
-    ΔR_max = 1.0e-8
+    ΔR_max = 1.0e-12   #TODO 1.0e-8
     ΔR_old = Inf
     for iter in 1:10000
         # Reconstruct metric
@@ -1073,54 +1086,57 @@ function find_coordinates(g₀::Tensor{2}, ϕ::Tensor{0})
     #     Δy = -2y
     #     Δz = -2z
 
-    # function tensor2vector!(v::AbstractVector{T}, t̃::SpinTensor{0,Complex{T}}) where {T}
-    #     @assert length(v) == nmodes
-    #     @assert length(t̃.coeffs[]) == nmodes
-    #     t = Tensor(t̃)
-    #     t = make_real(t)
-    #     idx = 0
-    #     for l in 0:lmax, m in 0:l
-    #         c = t̃.coeffs[][ash_mode_index(0, l, m, lmax)]
-    #         v[idx += 1] = real(c)
-    #         if m > 0
-    #             v[idx += 1] = imag(c)
-    #         end
-    #     end
-    #     @assert idx == nmodes
-    #     return v
-    # end
-    # tensor2vector(t̃::SpinTensor{0,Complex{T}}) where {T} = tensor2vector!(zeros(T, nmodes), t̃)
-    # 
-    # function vector2tensor!(t̃::SpinTensor{0,Complex{T}}, v::AbstractVector{T}) where {T}
-    #     @assert length(v) == nmodes
-    #     @assert length(t̃.coeffs[]) == nmodes
-    #     idx = 0
-    #     for l in 0:lmax, m in 0:l
-    #         c = zero(Complex{T})
-    #         c += v[idx += 1]
-    #         if m > 0
-    #             c += im * v[idx += 1]
-    #         end
-    #         t̃.coeffs[][ash_mode_index(0, l, m, lmax)] = c
-    #         if m > 0
-    #             t̃.coeffs[][ash_mode_index(0, l, -m, lmax)] = bitsign(m) * c'
-    #         end
-    #     end
-    #     @assert idx == nmodes
-    #     return t̃
-    # end
-    # vector2tensor(v::AbstractVector{T}) where {T} = vector2tensor!(SpinTensor{0}(zeros(Complex{T}, nmodes), lmax), v)
+    function spintensor2vector!(v::AbstractVector{T}, t̃::SpinTensor{0,Complex{T}}) where {T<:Real}
+        @assert length(v) == nmodes
+        @assert length(t̃.coeffs[]) == nmodes
+        idx = 0
+        for l in 0:lmax, m in 0:l
+            c = t̃.coeffs[][ash_mode_index(0, l, m, lmax)]
+            if !(abs(t̃.coeffs[][ash_mode_index(0, l, -m, lmax)] - bitsign(m) * c') ≤ sqrt(eps()))
+                @show l m c
+            end
+            @assert abs(t̃.coeffs[][ash_mode_index(0, l, -m, lmax)] - bitsign(m) * c') ≤ sqrt(eps())
+            v[idx += 1] = real(c)
+            if m > 0
+                v[idx += 1] = imag(c)
+            end
+        end
+        @assert idx == nmodes
+        return v
+    end
+    spintensor2vector(t̃::SpinTensor{0,Complex{T}}) where {T<:Real} = spintensor2vector!(zeros(T, nmodes), t̃)
 
-    tensor2vector!(v::AbstractVector, t̃::SpinTensor{0}) = (v .= t̃.coeffs[]; v)
-    tensor2vector(t̃::SpinTensor{0,T}) where {T} = tensor2vector!(zeros(T, nmodes), t̃)
+    function vector2spintensor!(t̃::SpinTensor{0,Complex{T}}, v::AbstractVector{T}) where {T<:Real}
+        @assert length(v) == nmodes
+        @assert length(t̃.coeffs[]) == nmodes
+        idx = 0
+        for l in 0:lmax, m in 0:l
+            c = zero(Complex{T})
+            c += v[idx += 1]
+            if m > 0
+                c += im * v[idx += 1]
+            end
+            t̃.coeffs[][ash_mode_index(0, l, m, lmax)] = c
+            if m > 0
+                t̃.coeffs[][ash_mode_index(0, l, -m, lmax)] = bitsign(m) * c'
+            end
+        end
+        @assert idx == nmodes
+        return t̃
+    end
+    vector2spintensor(v::AbstractVector{T}) where {T<:Real} = vector2spintensor!(SpinTensor{0}(zeros(Complex{T}, nmodes), lmax), v)
 
-    vector2tensor!(t̃::SpinTensor{0}, v::AbstractVector) = (t̃.coeffs[] .= v; t̃)
-    vector2tensor(v::AbstractVector{T}) where {T} = vector2tensor!(SpinTensor{0}(zeros(T, nmodes), lmax), v)
+    # spintensor2vector!(v::AbstractVector, t̃::SpinTensor{0}) = (v .= t̃.coeffs[]; v)
+    # spintensor2vector(t̃::SpinTensor{0,T}) where {T} = spintensor2vector!(zeros(T, nmodes), t̃)
+
+    # vector2spintensor!(t̃::SpinTensor{0}, v::AbstractVector) = (t̃.coeffs[] .= v; t̃)
+    # vector2spintensor(v::AbstractVector{T}) where {T} = vector2spintensor!(SpinTensor{0}(zeros(T, nmodes), lmax), v)
 
     function prod!(res, v, α, β)
-        # @assert eltype(res) == Float64
-        # @assert eltype(v) == Float64
-        local t̃ = vector2tensor(v)
+        @assert eltype(res) == Float64
+        @assert eltype(v) == Float64
+
+        local t̃ = vector2spintensor(v)
         local dt̃ = tensor_gradient(t̃)
         local ddt̃ = tensor_gradient(dt̃)
         local t = Tensor(t̃)
@@ -1133,44 +1149,83 @@ function find_coordinates(g₀::Tensor{2}, ϕ::Tensor{0})
             ],
             lmax,
         )
-        Lt̃ = SpinTensor(Lt)
-        if β == zero(β)
-            res .= α * tensor2vector(Lt̃)
+        local Lt̃ = SpinTensor(Lt)
+        if iszero(β)
+            res .= α * spintensor2vector(Lt̃)
         else
-            res .= α * tensor2vector(Lt̃̃) + β * res
+            res .= α * spintensor2vector(Lt̃) + β * res
         end
         return res
     end
 
+    # tensor2vector!(v::AbstractVector, t::Tensor{0}) = (v .= map(x -> real(x[]), t.values); v)
+    # tensor2vector(t::Tensor{0,T}) where {T} = tensor2vector!(zeros(typeof(real(zero(T))), nmodes), t)
+    # 
+    # vector2tensor!(t::Tensor{0}, v::AbstractVector) = (t.values .= map(x -> Scalar(Complex(x)), v); t)
+    # vector2tensor(v::AbstractVector{T}) where {T<:Real} = vector2tensor!(Tensor{0}(zeros(Complex{T}, nmodes), lmax), v)
+    # 
+    # function prod_real!(res, v, α, β)
+    #     @assert eltype(res) == Float64
+    #     @assert eltype(v) == Float64
+    # 
+    #     local t = vector2tensor(v)
+    #     local t̃ = SpinTensor{0}(t)
+    #     local dt̃ = tensor_gradient(t̃)
+    #     local ddt̃ = tensor_gradient(dt̃)
+    #     # local t = Tensor(t̃)
+    #     local dt = Tensor(dt̃)
+    #     local ddt = Tensor(ddt̃)
+    #     local Lt = Tensor{0}(
+    #         [
+    #             Scalar(sum(gu[a, b] * (ddt[a, b] - sum(Γ[c, a, b] * dt[c] for c in 1:2)) for a in 1:2, b in 1:2)) for
+    #             (gu, Γ, dt, ddt) in zip(gu.values, Γ.values, dt.values, ddt.values)
+    #         ],
+    #         lmax,
+    #     )
+    #     local Lt̃ = SpinTensor(Lt)
+    #     if iszero(β)
+    #         res .= α * tensor2vector(Lt̃)
+    #     else
+    #         res .= α * tensor2vector(Lt̃) + β * res
+    #     end
+    #     return res
+    # end
+
     println("Calling eigs...")
-    # L = LinearOperator(Float64, nmodes, nmodes, false, false, prod!, nothing, nothing)
-    # λ, v, nconv, niter, nmult, resid = eigs(L; nev=9, ritzvec=true, tol=eps()^(7/8), v0=ones(nmodes), which=:LR)
-    L = LinearOperator(Complex{Float64}, nmodes, nmodes, false, false, prod!, nothing, nothing)
-    λ, v, nconv, niter, nmult, resid = eigs(L; nev=9, ritzvec=true, tol=eps()^(7 / 8), v0=ones(Complex{Float64}, nmodes), which=:LR)
+    L = LinearOperator(Float64, nmodes, nmodes, false, false, prod!, nothing, nothing)
+    v0 = zeros(Float64, nmodes)
+    v0[1] = 1
+    λ, v, nconv, niter, nmult, resid = eigs(L; nev=9, ritzvec=true, tol=eps()^(7 / 8), v0=v0, which=:LR)
+    # L = LinearOperator(Complex{Float64}, nmodes, nmodes, false, false, prod!, nothing, nothing)
+    # λ, v, nconv, niter, nmult, resid = eigs(L; nev=9, ritzvec=true, tol=eps()^(7 / 8), v0=ones(Complex{Float64}, nmodes), which=:LR)
+    # L = LinearOperator(Float64, nmodes, nmodes, false, false, prod_real!, nothing, nothing)
+    # λ, v, nconv, niter, nmult, resid = eigs(L; nev=9, ritzvec=true, tol=eps()^(7 / 8), v0=fill(Scalar{Float64}(1), nmodes), which=:LR)
     println("    nconv=$nconv   niter=$niter   nmult=$nmult   |resid|=$(norm(resid))")
     for (i, λ) in enumerate(λ)
         println("    λ[$i]=$(chop(λ))   v[1,$i]=$(chop(v[1,i]))")
     end
-    # @show resid
-    # @show v[1,:]
 
     @assert isapprox(λ[1], 0; atol=sqrt(sqrt(eps())))
     @assert isapprox(λ[2], -2; atol=sqrt(sqrt(eps())))
     @assert isapprox(λ[3], -2; atol=sqrt(sqrt(eps())))
     @assert isapprox(λ[4], -2; atol=sqrt(sqrt(eps())))
 
-    x̃ = SpinTensor{0}(Scalar(@view v[:, 2]), lmax)
-    ỹ = SpinTensor{0}(Scalar(@view v[:, 3]), lmax)
-    z̃ = SpinTensor{0}(Scalar(@view v[:, 4]), lmax)
+    if !(norm(imag(@view v[:, 2])) ≤ 1.0e-12)
+        @show imag(@view v[:, 2])
+        @show norm(imag(@view v[:, 2]))
+    end
+    @assert norm(imag(@view v[:, 2])) ≤ 1.0e-12
+    @assert norm(imag(@view v[:, 3])) ≤ 1.0e-12
+    @assert norm(imag(@view v[:, 4])) ≤ 1.0e-12
+    x̃ = vector2spintensor(real(@view v[:, 2]))
+    ỹ = vector2spintensor(real(@view v[:, 3]))
+    z̃ = vector2spintensor(real(@view v[:, 4]))
     x = Tensor(x̃)
     y = Tensor(ỹ)
     z = Tensor(z̃)
-    # @show norm(imag.(map(x -> x[], x.values)))
-    # @show norm(imag.(map(x -> x[], y.values)))
-    # @show norm(imag.(map(x -> x[], z.values)))
-    x = make_real(x; check=false)
-    y = make_real(y; check=false)
-    z = make_real(z; check=false)
+    x = make_real(x)
+    y = make_real(y)
+    z = make_real(z)
 
     # Orthonormalize
     V = Tensor{0}([Scalar(sqrt(det(g))) for g in g.values], lmax)
@@ -1180,17 +1235,14 @@ function find_coordinates(g₀::Tensor{2}, ϕ::Tensor{0})
         return int(Tensor{0}([Scalar(sqrt(det(g)) * x[] * y[]) for (g, x, y) in zip(g.values, x.values, y.values)], lmax))
     end
 
-    # Orthonormalize with regard to conformal metric
+    # Orthonormalize with respect to conformal metric
 
     x.values ./= sqrt(dot(x, x))
 
-    # y.values ./= sqrt(dot(y, y))
     y.values .-= dot(y, x) * x.values
     y.values ./= sqrt(dot(y, y))
 
-    # z.values ./= sqrt(dot(z, z))
     z.values .-= dot(z, x) * x.values
-    # z.values ./= sqrt(dot(z, z))
     z.values .-= dot(z, y) * y.values
     z.values ./= sqrt(dot(z, z))
 
@@ -1204,18 +1256,18 @@ function find_coordinates(g₀::Tensor{2}, ϕ::Tensor{0})
     x̃ = SpinTensor(x)
     ỹ = SpinTensor(y)
     z̃ = SpinTensor(z)
-    println("    x: $(norm(L*tensor2vector(x̃)+2*tensor2vector(x̃)))")
-    println("    y: $(norm(L*tensor2vector(ỹ)+2*tensor2vector(ỹ)))")
-    println("    z: $(norm(L*tensor2vector(z̃)+2*tensor2vector(z̃)))")
+    println("    x: ", norm(L * spintensor2vector(x̃) + 2 * spintensor2vector(x̃)))
+    println("    y: ", norm(L * spintensor2vector(ỹ) + 2 * spintensor2vector(ỹ)))
+    println("    z: ", norm(L * spintensor2vector(z̃) + 2 * spintensor2vector(z̃)))
 
     return x, y, z
 end
 
-function kerr_schild_omega(θ, ϕ)
+function kerr_schild_omega(θ, ϕ; M=1.0, a=0.5, Q=0.0)
     # Cook, sec. 3.3.1
-    M = 1
-    a = 0.5
-    Q = 0
+    # M = 1
+    # a = 0.5
+    # Q = 0
     r_EH = M + sqrt(M^2 - a^2 - Q^2)
     # @show M a Q r_EH
     x = SVector(0, r_EH, θ, ϕ)
@@ -1252,10 +1304,7 @@ function kerr_schild_omega(θ, ϕ)
     # @show chop.(ω)
     ω2 = ω' * gu * ω
     # @show chop(ω2)
-    if !(ω′ ≈ ω)
-        @show θ ϕ chop.(ω) chop.(ω′) chop.(ω′ - ω)
-    end
-    @assert ω′ ≈ ω
+    @assert isapprox(ω′, ω; atol=sqrt(eps()))
 
     # Expansion Θ
     qu = SMatrix{4,4}(sum(gu[a, c] * gu[b, d] * q[c, d] for c in 1:4, d in 1:4) for a in 1:4, b in 1:4)
@@ -1277,7 +1326,7 @@ end
 
 ################################################################################
 
-function main(; lmax::Int=30, visualize::Bool=false)
+function main(; M::Float64=1.0, a::Float64=0.5, Q::Float64=0.0, lmax::Int=30, visualize::Bool=false)
     sz = ash_grid_size(lmax)
 
     # Set up the metric
@@ -1288,12 +1337,14 @@ function main(; lmax::Int=30, visualize::Bool=false)
         [
             begin
                 θ, ϕ = ash_point_coord(ij, lmax)
-                q, ω = kerr_schild_omega(θ, ϕ)
+                q, ω = kerr_schild_omega(θ, ϕ; M=M, a=a, Q=Q)
                 SMatrix{2,2}(q[3, 3], q[3, 4] / sin(θ), q[4, 3] / sin(θ), q[4, 4] / sin(θ)^2)
             end for ij in CartesianIndices(sz)
         ], lmax
     )
 
+    detg = make_detg(g)
+    detg = make_real(detg)
     gu = make_gu(g)
     gu = make_real(gu)
     gu = make_symmetric(gu)
@@ -1305,8 +1356,17 @@ function main(; lmax::Int=30, visualize::Bool=false)
     ϕ = ricci_flow(g)
     ϕ_min, ϕ_max = extrema(real(map(x -> x[], ϕ.values)))
     println("ϕ:   min: ", ϕ_min, "   max: ", ϕ_max)
+    ϕ̃ = SpinTensor(ϕ)
+    for l in 0:lmax
+        println("    |ϕ[l=$l]|=", mode_norm(ϕ̃, l))
+    end
     g′ = Tensor{2}([SMatrix{2,2}(ϕ[] * g[a, b] for a in 1:2, b in 1:2) for (ϕ, g) in zip(ϕ.values, g.values)], lmax)
+    A′ = Tensor{0}([Scalar(sqrt(det(g′))) for g′ in g′.values], lmax)
+    Ã′ = SpinTensor(A′)
+    Aavg′ = sqrt(4π) * real(Ã′.coeffs[][ash_mode_index(0, 0, 0, lmax)])
+    R′ = sqrt(Aavg′ / 4π)
     Rsc′ = calc_ricci(g′)
+    println("R′:   $R′")
     println("Rsc′:   min: ", minimum(real(map(x -> x[], Rsc′.values))), "   max: ", maximum(real(map(x -> x[], Rsc′.values))))
 
     # Rescale sphere
@@ -1314,18 +1374,47 @@ function main(; lmax::Int=30, visualize::Bool=false)
     avg_Rsc′ = (minimum(real(map(x -> x[], Rsc′.values))) + maximum(real(map(x -> x[], Rsc′.values)))) / 2
     ϕ.values .*= avg_Rsc′ / 2
     g′ = Tensor{2}([SMatrix{2,2}(ϕ[] * g[a, b] for a in 1:2, b in 1:2) for (ϕ, g) in zip(ϕ.values, g.values)], lmax)
+    A′ = Tensor{0}([Scalar(sqrt(det(g′))) for g′ in g′.values], lmax)
+    Ã′ = SpinTensor(A′)
+    Aavg′ = sqrt(4π) * real(Ã′.coeffs[][ash_mode_index(0, 0, 0, lmax)])
+    R′ = sqrt(Aavg′ / 4π)
     Rsc′ = calc_ricci(g′)
+    println("R′:   $R′")
     println("Rsc′:   min: ", minimum(real(map(x -> x[], Rsc′.values))), "   max: ", maximum(real(map(x -> x[], Rsc′.values))))
+
+    detg′ = make_detg(g′)
+    detg′ = make_real(detg′)
+    gu′ = make_gu(g′)
+    gu′ = make_real(gu′)
+    gu′ = make_symmetric(gu′)
 
     # Find good coordinates
     x, y, z = find_coordinates(g, ϕ)
-    # @show extrema(map(x -> Real(x[]), x.values))
-    # @show extrema(map(x -> Real(x[]), y.values))
-    # @show extrema(map(x -> Real(x[]), z.values))
-    # x.values ./= norm(x.values, Inf)
-    # y.values ./= norm(y.values, Inf)
-    # z.values ./= norm(z.values, Inf)
+    r = Tensor{0}([Scalar(sqrt(x[]^2 + y[]^2 + z[]^2)) for (x, y, z) in zip(x.values, y.values, z.values)], lmax)
+    @assert maximum(map(x -> abs(x[] - 1), r.values)) ≤ 1.0e-7
+    # Rescale coordinates
+    # Why doesn't the coordinate finder do this automatically?
+    x = Tensor{0}([Scalar(x[] / r[]) for (x, r) in zip(x.values, r.values)], lmax)
+    y = Tensor{0}([Scalar(y[] / r[]) for (y, r) in zip(y.values, r.values)], lmax)
+    z = Tensor{0}([Scalar(z[] / r[]) for (z, r) in zip(z.values, r.values)], lmax)
+    r = Tensor{0}([Scalar(sqrt(x[]^2 + y[]^2 + z[]^2)) for (x, y, z) in zip(x.values, y.values, z.values)], lmax)
+    @assert all(map(x -> x[], r.values) .≈ 1)
+
+    did_correct_coordinates = false
+    @label redo
+
     xs = [x, y, z]
+
+    # # output z, gθθ
+    # zs = map(a -> real(a[]), ash_grid_as_phi_theta(z.values))
+    # gθθs = map(a -> real(a[1, 1]), ash_grid_as_phi_theta(g.values))
+    # gϕϕs = map(a -> real(a[2, 2]), ash_grid_as_phi_theta(g.values))
+    # g′θθs = map(a -> real(a[1, 1]), ash_grid_as_phi_theta(g′.values))
+    # g′ϕϕs = map(a -> real(a[2, 2]), ash_grid_as_phi_theta(g′.values))
+    # println(@sprintf "    %-2s    %-9s    %-9s    %-9s    %-9s" "j" "cos(θ)" "z" "g′θθ" "g′ϕϕ")
+    # for j in 1:size(zs, 2)
+    #     println(@sprintf "    %2d    %9f    %9f    %9f    %9f" j cos(ash_thetas(lmax)[j]) -zs[1, j] g′θθs[1, j] g′ϕϕs[1, j])
+    # end
 
     # Calculate vector fields ϕᵢ and ξᵢ
     x̃ = SpinTensor(x)
@@ -1337,41 +1426,222 @@ function main(; lmax::Int=30, visualize::Bool=false)
     dx = Tensor(dx̃)
     dy = Tensor(dỹ)
     dz = Tensor(dz̃)
-    # ϕᵢ^a = curl xᵢ
-    ϕx = Tensor{1}([SVector{2}(sum(epsilon[a, b] * dx[b] for b in 1:2) for a in 1:2) for dx in dx.values], lmax)
-    ϕy = Tensor{1}([SVector{2}(sum(epsilon[a, b] * dy[b] for b in 1:2) for a in 1:2) for dy in dy.values], lmax)
-    ϕz = Tensor{1}(
+    # x = r*sin(θ)*cos(ϕ)
+    # y = r*sin(θ)*sin(ϕ)
+    # z = r*cos(θ)
+    # ∂x/∂θ = r*cos(θ)*cos(ϕ)
+    # ∂y/∂θ = r*cos(θ)*sin(ϕ)
+    # ∂z/∂θ = -r*sin(θ)
+    # ∂x/∂ϕ = -r*sin(ϕ)
+    # ∂y/∂ϕ = r*cos(ϕ)
+    # ∂z/∂ϕ = 0
+    ϕx = Tensor{1}(
         [
-            begin
-                θ, ϕ = ash_point_coord(ij, lmax)
-                epsilon = SMatrix{2,2}(0, -1, 1, 0) * sin(θ)
-                dz = SVector{2}(1,0)
-                SVector{2}(sum(epsilon[a, b] * dz[b] for b in 1:2) for a in 1:2)
-            end for (ij, dz) in zip(CartesianIndices(sz), dz.values)
+
+            # Λ ∇x
+            # 
+            # Λ⁻¹ ∂x
+            # 
+            # Λ⁻¹ g⁻¹ Λ⁻¹
+            # 
+            # Λ g Λ
+            # 
+            # ϵ
+            # 
+            # δ
+            # 
+            # 
+            # 
+            # ϵ ∂x
+            # 
+            # ϵ g⁻¹ ∇x
+
+            # SVector{2}(sum(epsilon[a, b] * detg′[] * gu′[b, c] * dx[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(epsilon[a, b] * sqrt(detg′[]) * gu′[b, c] * dx[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(epsilon[a, b] * gu′[b, c] * dx[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(gu′[a, b] * epsilon[b, c] * dx[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(epsilon[a, b] * dx[b] for b in 1:2) for a in 1:2) for
+            sqrt(gu′) * epsilon * sqrt(gu′) * dx for
+            (detg′, gu′, dx) in zip(detg′.values, gu′.values, dx.values)
         ],
         lmax,
     )
-    # ξᵢ^a = grad xᵢ
-    ξx = Tensor{1}([SVector{2}(sum(gu[a, b] * dx[b] for b in 1:2) for a in 1:2) for (gu, dx) in zip(gu.values, dx.values)], lmax)
-    ξy = Tensor{1}([SVector{2}(sum(gu[a, b] * dy[b] for b in 1:2) for a in 1:2) for (gu, dy) in zip(gu.values, dy.values)], lmax)
-    ξz = Tensor{1}([SVector{2}(sum(gu[a, b] * dz[b] for b in 1:2) for a in 1:2) for (gu, dz) in zip(gu.values, dz.values)], lmax)
+    ϕy = Tensor{1}(
+        [
+            # SVector{2}(sum(epsilon[a, b] * detg′[] * gu′[b, c] * dy[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(epsilon[a, b] * sqrt(detg′[]) * gu′[b, c] * dy[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(epsilon[a, b] * gu′[b, c] * dy[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(gu′[a, b] * epsilon[b, c] * dy[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(epsilon[a, b] * dy[b] for b in 1:2) for a in 1:2) for
+            sqrt(gu′) * epsilon * sqrt(gu′) * dy for
+            (detg′, gu′, dy) in zip(detg′.values, gu′.values, dy.values)
+        ],
+        lmax,
+    )
+    ϕz = Tensor{1}(
+        [
+            # SVector{2}(sum(epsilon[a, b] * detg′[] * gu′[b, c] * dz[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(epsilon[a, b] * sqrt(detg′[]) * gu′[b, c] * dz[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(epsilon[a, b] * gu′[b, c] * dz[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(gu′[a, b] * epsilon[b, c] * dz[c] for b in 1:2, c in 1:2) for a in 1:2) for
+            # SVector{2}(sum(epsilon[a, b] * dz[b] for b in 1:2) for a in 1:2) for
+            sqrt(gu′) * epsilon * sqrt(gu′) * dz for
+            (detg′, gu′, dz) in zip(detg′.values, gu′.values, dz.values)
+        ],
+        lmax,
+    )
+    ξx = Tensor{1}([SVector{2}(sum(gu′[a, b] * dx[b] for b in 1:2) for a in 1:2) for (gu′, dx) in zip(gu′.values, dx.values)], lmax)
+    ξy = Tensor{1}([SVector{2}(sum(gu′[a, b] * dy[b] for b in 1:2) for a in 1:2) for (gu′, dy) in zip(gu′.values, dy.values)], lmax)
+    ξz = Tensor{1}([SVector{2}(sum(gu′[a, b] * dz[b] for b in 1:2) for a in 1:2) for (gu′, dz) in zip(gu′.values, dz.values)], lmax)
+    ϕs = [ϕx, ϕy, ϕz]
+    ξs = [ξx, ξy, ξz]
 
-    norms(t::SpinTensor{1}) = [mode_norm(t, l) for l in 1:10]
-    @show chop.(norms(SpinTensor(ϕx)))
-    @show chop.(norms(SpinTensor(ϕy)))
-    @show chop.(norms(SpinTensor(ϕz)))
-    @show chop.(norms(SpinTensor(ξx)))
-    @show chop.(norms(SpinTensor(ξy)))
-    @show chop.(norms(SpinTensor(ξz)))
+    # handxy = Tensor{0}(
+    #     [
+    #         Scalar(sum(epsilon[a, b] * dx[a] * gu′[b, c] * dy[c] * z[] for a in 1:2, b in 1:2, c in 1:2)) for
+    #         (gu′, dx, dy, z) in zip(gu′.values, dx.values, dy.values, z.values)
+    #     ],
+    #     lmax,
+    # )
+    # handyz = Tensor{0}(
+    #     [
+    #         Scalar(sum(epsilon[a, b] * dy[a] * gu′[b, c] * dz[c] * x[] for a in 1:2, b in 1:2, c in 1:2)) for
+    #         (gu′, dy, dz, x) in zip(gu′.values, dy.values, dz.values, x.values)
+    #     ],
+    #     lmax,
+    # )
+    # handzx = Tensor{0}(
+    #     [
+    #         Scalar(sum(epsilon[a, b] * dz[a] * gu′[b, c] * dx[c] * y[] for a in 1:2, b in 1:2, c in 1:2)) for
+    #         (gu′, dz, dx, y) in zip(gu′.values, dz.values, dx.values, y.values)
+    #     ],
+    #     lmax,
+    # )
+    # println("hand[x,y]: ", extrema(map(a -> real(a[]), handxy.values)))
+    # println("hand[y,z]: ", extrema(map(a -> real(a[]), handyz.values)))
+    # println("hand[z,x]: ", extrema(map(a -> real(a[]), handzx.values)))
+    # 
+    # mi, ma = extrema(map(a -> real(a[]), handxy.values))
+    # isright = mi < -0.5 && ma < 0.5
+    # if !isright
+    #     z = -z
+    #     @goto redo
+    # end
 
-    nϕ = ash_nphi(lmax)
-    nθ = ash_ntheta(lmax)
-    dϕ = 2π / nϕ
-    int_ϕz = [
-        sum(ash_grid_as_phi_theta(ϕz.values)[i, j][2] * sqrt(ash_grid_as_phi_theta(g.values)[i, j][2, 2]) * dϕ for i in 1:nϕ) for
-        j in 1:nθ
-    ]
-    @show chop.(real(int_ϕz))
+    # norms(t::SpinTensor{1}) = [mode_norm(t, l) for l in 1:10]
+    # @show chop.(norms(SpinTensor(ϕx)))
+    # @show chop.(norms(SpinTensor(ϕy)))
+    # @show chop.(norms(SpinTensor(ϕz)))
+    # @show chop.(norms(SpinTensor(ξx)))
+    # @show chop.(norms(SpinTensor(ξy)))
+    # @show chop.(norms(SpinTensor(ξz)))
+
+    # TODO: Test normalization of ϕ and ξ
+
+    norm_error = 0.0
+    norm_count = 0
+
+    # Test so(1,3) Lie algebra
+    for i in 1:3, j in (i + 1):3, c in 1:3
+        f = xs[c]
+        ϕi = ϕs[i]
+        ϕj = ϕs[j]
+        ϕk = sum(epsilon3[i, j, k] * ϕs[k] for k in 1:3)
+        df = Tensor(tensor_gradient(SpinTensor(f)))
+        ϕif = Tensor{0}([Scalar(sum(ϕi[a] * df[a] for a in 1:2)) for (ϕi, df) in zip(ϕi.values, df.values)], lmax)
+        ϕjf = Tensor{0}([Scalar(sum(ϕj[a] * df[a] for a in 1:2)) for (ϕj, df) in zip(ϕj.values, df.values)], lmax)
+        ϕkf = Tensor{0}([Scalar(sum(ϕk[a] * df[a] for a in 1:2)) for (ϕk, df) in zip(ϕk.values, df.values)], lmax)
+        dϕif = Tensor(tensor_gradient(SpinTensor(ϕif)))
+        dϕjf = Tensor(tensor_gradient(SpinTensor(ϕjf)))
+        ϕjϕif = Tensor{0}([Scalar(sum(ϕj[a] * dϕif[a] for a in 1:2)) for (ϕj, dϕif) in zip(ϕj.values, dϕif.values)], lmax)
+        ϕiϕjf = Tensor{0}([Scalar(sum(ϕi[a] * dϕjf[a] for a in 1:2)) for (ϕi, dϕjf) in zip(ϕi.values, dϕjf.values)], lmax)
+        delta = Tensor{0}(
+            [Scalar(ϕjϕif[] - ϕiϕjf[] + ϕkf[]) for (ϕjϕif, ϕiϕjf, ϕkf) in zip(ϕjϕif.values, ϕiϕjf.values, ϕkf.values)], lmax
+        )
+        maxdelta = maximum(map(a -> abs(a[]), delta.values))
+        norm_error += maxdelta^2
+        norm_count += 1
+        dirs = ["x", "y", "z"]
+        println(@sprintf "[ϕ%s,ϕ%s](%s): %g" dirs[i] dirs[j] dirs[c] maxdelta)
+        if i == 1 && j == 2 && c == 1
+            ϕjϕif̃ = SpinTensor(ϕjϕif)
+            ϕiϕjf̃ = SpinTensor(ϕiϕjf)
+            ϕkf̃ = SpinTensor(ϕkf)
+            deltã = SpinTensor(delta)
+            for l in 0:lmax
+                println(
+                    @sprintf "    %2d    %12g    %12g    %12g    %12g" l mode_norm(ϕjϕif̃, l) mode_norm(ϕiϕjf̃, l) mode_norm(ϕkf̃, l) mode_norm(
+                        deltã, l
+                    )
+                )
+            end
+        end
+    end
+
+    for i in 1:3, j in (i + 1):3, c in 1:3
+        f = xs[c]
+        ξi = ξs[i]
+        ξj = ξs[j]
+        ϕk = sum(epsilon3[i, j, k] * ϕs[k] for k in 1:3)
+        df = Tensor(tensor_gradient(SpinTensor(f)))
+        ξif = Tensor{0}([Scalar(sum(ξi[a] * df[a] for a in 1:2)) for (ξi, df) in zip(ξi.values, df.values)], lmax)
+        ξjf = Tensor{0}([Scalar(sum(ξj[a] * df[a] for a in 1:2)) for (ξj, df) in zip(ξj.values, df.values)], lmax)
+        ϕkf = Tensor{0}([Scalar(sum(ϕk[a] * df[a] for a in 1:2)) for (ϕk, df) in zip(ϕk.values, df.values)], lmax)
+        dξif = Tensor(tensor_gradient(SpinTensor(ξif)))
+        dξjf = Tensor(tensor_gradient(SpinTensor(ξjf)))
+        ξjξif = Tensor{0}([Scalar(sum(ξj[a] * dξif[a] for a in 1:2)) for (ξj, dξif) in zip(ξj.values, dξif.values)], lmax)
+        ξiξjf = Tensor{0}([Scalar(sum(ξi[a] * dξjf[a] for a in 1:2)) for (ξi, dξjf) in zip(ξi.values, dξjf.values)], lmax)
+        delta = Tensor{0}(
+            [Scalar(ξjξif[] - ξiξjf[] - ϕkf[]) for (ξjξif, ξiξjf, ϕkf) in zip(ξjξif.values, ξiξjf.values, ϕkf.values)], lmax
+        )
+        maxdelta = maximum(map(a -> abs(a[]), delta.values))
+        norm_error += maxdelta^2
+        norm_count += 1
+        dirs = ["x", "y", "z"]
+        println(@sprintf "[ξ%s,ξ%s](%s): %g" dirs[i] dirs[j] dirs[c] maxdelta)
+    end
+
+    for i in 1:3, j in 1:3, c in 1:3
+        f = xs[c]
+        ξi = ξs[i]
+        ϕj = ϕs[j]
+        ξk = sum(epsilon3[i, j, k] * ξs[k] for k in 1:3)
+        df = Tensor(tensor_gradient(SpinTensor(f)))
+        ξif = Tensor{0}([Scalar(sum(ξi[a] * df[a] for a in 1:2)) for (ξi, df) in zip(ξi.values, df.values)], lmax)
+        ϕjf = Tensor{0}([Scalar(sum(ϕj[a] * df[a] for a in 1:2)) for (ϕj, df) in zip(ϕj.values, df.values)], lmax)
+        ξkf = Tensor{0}([Scalar(sum(ξk[a] * df[a] for a in 1:2)) for (ξk, df) in zip(ξk.values, df.values)], lmax)
+        dξif = Tensor(tensor_gradient(SpinTensor(ξif)))
+        dϕjf = Tensor(tensor_gradient(SpinTensor(ϕjf)))
+        ϕjξif = Tensor{0}([Scalar(sum(ϕj[a] * dξif[a] for a in 1:2)) for (ϕj, dξif) in zip(ϕj.values, dξif.values)], lmax)
+        ξiϕjf = Tensor{0}([Scalar(sum(ξi[a] * dϕjf[a] for a in 1:2)) for (ξi, dϕjf) in zip(ξi.values, dϕjf.values)], lmax)
+        delta = Tensor{0}(
+            [Scalar(ϕjξif[] - ξiϕjf[] + ξkf[]) for (ϕjξif, ξiϕjf, ξkf) in zip(ϕjξif.values, ξiϕjf.values, ξkf.values)], lmax
+        )
+        maxdelta = maximum(map(a -> abs(a[]), delta.values))
+        norm_error += maxdelta^2
+        norm_count += 1
+        dirs = ["x", "y", "z"]
+        println(@sprintf "[ξ%s,ϕ%s](%s): %g" dirs[i] dirs[j] dirs[c] maxdelta)
+    end
+
+    norm_error = sqrt(norm_error / norm_count)
+
+    if norm_error > 1.0e-2
+        @assert !did_correct_coordinates
+        println("Coordinates are left-handed; correcting")
+        z = -z
+        did_correct_coordinates = true
+        @goto redo
+    end
+
+    # nϕ = ash_nphi(lmax)
+    # nθ = ash_ntheta(lmax)
+    # dϕ = 2π / nϕ
+    # int_ϕz = [
+    #     sum(ash_grid_as_phi_theta(ϕz.values)[i, j][2] * sqrt(ash_grid_as_phi_theta(g.values)[i, j][2, 2]) * dϕ for i in 1:nϕ) for
+    #     j in 1:nθ
+    # ]
+    # @show chop.(real(int_ϕz))
 
     # Set up rotation one-form ω
     ω = Tensor{1}([
@@ -1387,6 +1657,7 @@ function main(; lmax::Int=30, visualize::Bool=false)
     # Calculate spin integrals
     int(f::Tensor{0}) = sqrt(4π) * real(SpinTensor(f).coeffs[][ash_mode_index(0, 0, 0, lmax)])
     V_kernel = Tensor{0}([Scalar(sqrt(det(g))) for g in g.values], lmax)
+    @warn "DO WE NEED TO SCALE ϕᵢ BY THE CONFORMAL FACTOR?"
     Jx_kernel = Tensor{0}(
         [
             Scalar(sum(gu[a, b] * ω[a] * ϕx[b] for a in 1:2, b in 1:2) * sqrt(det(g))) for
