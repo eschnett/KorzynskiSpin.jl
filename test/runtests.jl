@@ -69,7 +69,7 @@ end
         emb = (θ, ϕ) -> SVector(abc[1] * sin(θ) * cos(ϕ), abc[2] * sin(θ) * sin(ϕ), abc[3] * cos(θ))
         curvature_error = Float64[]
         for lmax in (16, 24)
-            grid = DriscollHealyGrid(lmax)
+            grid = EquiangularGrid(lmax)
             geom = surface_geometry(emb, flat3, zero3, grid)
             ops = MetricOps(geom.q)
             R = real_part(scalar_curvature(ops))
@@ -94,7 +94,7 @@ end
 
     @testset "Synthetic rotation form on the round sphere" begin
         lmax = 16
-        grid = DriscollHealyGrid(lmax)
+        grid = EquiangularGrid(lmax)
         emb = shape_embedding((θ, ϕ) -> 1.0)
         geom = surface_geometry(emb, flat3, zero3, grid)
         ops = MetricOps(geom.q)

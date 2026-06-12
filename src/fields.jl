@@ -2,8 +2,9 @@
 # AbstractSphericalHarmonics' `Tensor`/`SpinTensor` representation.
 #
 # Conventions (see docs/algorithm.tex §4.1):
-# - Fields live on the collocation grid of a `SphereGrid` (by default a
-#   Driscoll--Healy grid, backend SSHT) of size `ash_grid_size(grid)`.
+# - Fields live on the collocation grid of a `SphereGrid` (by default an
+#   equiangular grid, backend FastSphericalHarmonics) of size
+#   `ash_grid_size(grid)`.
 # - Tensor components are stored in the orthonormal coordinate dyad
 #   (eθ, eϕ) of the *unit coordinate sphere* q̂; covariant and
 #   contravariant components coincide in this frame with respect to q̂.

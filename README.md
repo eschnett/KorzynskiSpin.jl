@@ -44,7 +44,8 @@ centre (as produced by an apparent horizon finder), use
 All angular derivatives are taken pseudospectrally (spin-weighted spherical
 harmonics via
 [AbstractSphericalHarmonics.jl](https://github.com/eschnett/AbstractSphericalHarmonics.jl)
-/ [SSHT.jl](https://github.com/eschnett/SSHT.jl)); no derivatives of the
+/ [FastSphericalHarmonics.jl](https://github.com/eschnett/FastSphericalHarmonics.jl));
+no derivatives of the
 Cauchy data are required.
 
 ## Validation

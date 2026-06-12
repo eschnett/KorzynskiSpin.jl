@@ -152,7 +152,7 @@ function horizon_spin(
     metric3,
     excurv3;
     lmax::Int=24,
-    grid::SphereGrid=DriscollHealyGrid(lmax),
+    grid::SphereGrid=EquiangularGrid(lmax),
     flow_tol::Float64=1.0e-3,
     flow_maxiter::Int=10_000,
     newton_tol::Float64=1.0e-13,
