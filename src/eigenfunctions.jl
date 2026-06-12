@@ -26,12 +26,12 @@ end
 uniformizing conformal exponent.
 """
 function sphere_eigenfunctions(ops̄::MetricOps, u::Tensor{0}; Δ̄mat::Union{Nothing,Matrix{ComplexF64}}=nothing)
-    lmax = ops̄.lmax
-    n = ash_nmodes(lmax)[1]
+    grid = ops̄.grid
+    n = ash_nmodes(grid)[1]
 
     e2u = exp.(2 .* real.(grid_values(u)))
-    A = Δ̄mat === nothing ? operator_matrix(f -> laplacian(ops̄, f), lmax) : Δ̄mat
-    B = multiplication_matrix(make_scalar(e2u, lmax))
+    A = Δ̄mat === nothing ? operator_matrix(f -> laplacian(ops̄, f), grid) : Δ̄mat
+    B = multiplication_matrix(make_scalar(e2u, grid))
 
     # Dense generalized eigenproblem; take the cluster nearest −2
     ev = eigen(A, B)
@@ -43,13 +43,13 @@ function sphere_eigenfunctions(ops̄::MetricOps, u::Tensor{0}; Δ̄mat::Union{No
     # the real and imaginary parts of the eigenfields.
     candidates = Vector{Matrix{Float64}}()
     for j in idx
-        f = grid_values(coeffs_scalar(ev.vectors[:, j], lmax))
+        f = grid_values(coeffs_scalar(ev.vectors[:, j], grid))
         push!(candidates, real.(f))
         push!(candidates, imag.(f))
     end
     # Round measure relative to ε̂
     μ̊ = e2u .* real.(grid_values(ops̄.sqrtdetq))
-    inner(f, g) = integrate_unit(make_scalar(f .* g .* μ̊, lmax))
+    inner(f, g) = integrate_unit(make_scalar(f .* g .* μ̊, grid))
     G = [inner(f, g) for f in candidates, g in candidates]
     evG = eigen(Symmetric(G))
     # Top three directions span the eigenspace
@@ -65,7 +65,7 @@ function sphere_eigenfunctions(ops̄::MetricOps, u::Tensor{0}; Δ̄mat::Union{No
     W = inv(sqrt(G3))
     χs = [sum(W[i, m] .* χs[m] for m in 1:3) for i in 1:3]
 
-    χ = ntuple(i -> make_scalar(χs[i], lmax), 3)
+    χ = ntuple(i -> make_scalar(χs[i], grid), 3)
     dχ = ntuple(i -> real_part(differential(χ[i])), 3)
 
     # Handedness: 𝒪 = ∮ χ₁ ε̊^{ab} ∂_aχ₂ ∂_bχ₃ ε̊ = +4π/3 for a right-handed
@@ -74,7 +74,7 @@ function sphere_eigenfunctions(ops̄::MetricOps, u::Tensor{0}; Δ̄mat::Union{No
     cross12 = [
         real(d2[1] * d3[2] - d2[2] * d3[1]) for (d2, d3) in zip(dχ[2].values, dχ[3].values)
     ]
-    𝒪 = integrate_unit(make_scalar(χs[1] .* cross12, lmax))
+    𝒪 = integrate_unit(make_scalar(χs[1] .* cross12, grid))
     if 𝒪 < 0
         χ = (χ[2], χ[1], χ[3])
         dχ = (dχ[2], dχ[1], dχ[3])
@@ -102,8 +102,8 @@ Round metric q̊ = e^{2u} q̄; generators per Lemma 1 of docs/algorithm.tex:
 φ_i^a = ε̊^{ab} ∂_b χ_i, ξ_i^a = −q̊^{ab} ∂_b χ_i.
 """
 function mobius_generators(ops̄::MetricOps, u::Tensor{0}, eig::SphereEigenfunctions)
-    lmax = ops̄.lmax
-    sz = ash_grid_size(lmax)
+    grid = ops̄.grid
+    sz = ash_grid_size(grid)
     e2u = exp.(2 .* real.(grid_values(u)))
 
     φs = Vector{Tensor{1}}()
@@ -121,8 +121,8 @@ function mobius_generators(ops̄::MetricOps, u::Tensor{0}, eig::SphereEigenfunct
             φvals[ij] = SVector{2,ComplexF64}(d[2] / sd, -d[1] / sd)
             ξvals[ij] = SVector{2,ComplexF64}(-(q̊u * d))
         end
-        push!(φs, Tensor{1}(φvals, lmax))
-        push!(ξs, Tensor{1}(ξvals, lmax))
+        push!(φs, Tensor{1}(φvals, grid))
+        push!(ξs, Tensor{1}(ξvals, grid))
     end
     return MobiusGenerators((φs[1], φs[2], φs[3]), (ξs[1], ξs[2], ξs[3]))
 end

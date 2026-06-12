@@ -1,3 +1,4 @@
+using AbstractSphericalHarmonics
 using KorzyńskiSpin
 using LinearAlgebra
 using StaticArrays
@@ -68,7 +69,8 @@ end
         emb = (θ, ϕ) -> SVector(abc[1] * sin(θ) * cos(ϕ), abc[2] * sin(θ) * sin(ϕ), abc[3] * cos(θ))
         curvature_error = Float64[]
         for lmax in (16, 24)
-            geom = surface_geometry(emb, flat3, zero3, lmax)
+            grid = DriscollHealyGrid(lmax)
+            geom = surface_geometry(emb, flat3, zero3, grid)
             ops = MetricOps(geom.q)
             R = real_part(scalar_curvature(ops))
             @test integrate(geom, R) ≈ 8π atol = 1.0e-6
@@ -92,14 +94,15 @@ end
 
     @testset "Synthetic rotation form on the round sphere" begin
         lmax = 16
+        grid = DriscollHealyGrid(lmax)
         emb = shape_embedding((θ, ϕ) -> 1.0)
-        geom = surface_geometry(emb, flat3, zero3, lmax)
+        geom = surface_geometry(emb, flat3, zero3, grid)
         ops = MetricOps(geom.q)
-        Δmat = operator_matrix(f -> laplacian(ops, f), lmax)
+        Δmat = operator_matrix(f -> laplacian(ops, f), grid)
 
         α, β, γc = 0.3, -0.2, 0.5
-        f = scalar_field((θ, ϕ) -> α * cos(θ) + β * sin(θ) * cos(ϕ), lmax)
-        g = scalar_field((θ, ϕ) -> γc * sin(θ) * sin(ϕ) + 0.1 * (3cos(θ)^2 - 1), lmax)
+        f = scalar_field((θ, ϕ) -> α * cos(θ) + β * sin(θ) * cos(ϕ), grid)
+        g = scalar_field((θ, ϕ) -> γc * sin(θ) * sin(ϕ) + 0.1 * (3cos(θ)^2 - 1), grid)
         df = differential(f)
         dg = differential(g)
         # ω = ⋆df + dg in dyad components: (⋆α)_1 = α_2, (⋆α)_2 = −α_1
@@ -109,7 +112,7 @@ end
         gdev = real.(grid_values(gsol)) .- real.(grid_values(g))
         @test maximum(gdev) - minimum(gdev) < 1.0e-12   # recovered up to a constant
 
-        R̄ = make_scalar(fill(2.0 + 0im, size(grid_values(f))), lmax)
+        R̄ = make_scalar(fill(2.0 + 0im, size(grid_values(f))), grid)
         unif = uniformize(ops, R̄; Δ̄mat=Δmat)
         eig = sphere_eigenfunctions(ops, unif.u; Δ̄mat=Δmat)
         gen = mobius_generators(ops, unif.u, eig)

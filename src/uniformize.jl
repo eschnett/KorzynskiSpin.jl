@@ -25,9 +25,9 @@ end
 
 "R[e^{2u} q̄] given R̄ and Δ̄u"
 function conformal_curvature(R̄::Tensor{0}, Δu::Tensor{0}, u::Tensor{0})
-    lmax = u.lmax
+    grid = u.grid
     vals = exp.(-2 .* grid_values(u)) .* (grid_values(R̄) - 2 .* grid_values(Δu))
-    return make_scalar(vals, lmax)
+    return make_scalar(vals, grid)
 end
 
 function uniformize(
@@ -40,14 +40,14 @@ function uniformize(
     newton_maxiter::Int=50,
     use_newton::Bool=true,
 )
-    lmax = ops̄.lmax
-    n = ash_nmodes(lmax)[1]
-    ls = [ash_mode_numbers(0, CartesianIndex(i), lmax)[1] for i in 1:n]
+    grid = ops̄.grid
+    n = ash_nmodes(grid)[1]
+    ls = [ash_mode_numbers(grid, 0, i)[1] for i in 1:n]
 
     R̄vals = real.(grid_values(R̄))
     sdq̄ = real.(grid_values(ops̄.sqrtdetq))
     ucoeffs = zeros(ComplexF64, n)
-    i00 = LinearIndices((n,))[ash_mode_index(0, 0, 0, lmax)]
+    i00 = LinearIndices((n,))[ash_mode_index(grid, 0, 0, 0)]
 
     residual(Rvals) = maximum(abs.(Rvals .- 2))
 
@@ -63,7 +63,7 @@ function uniformize(
     res_prev = Inf
     ucoeffs_prev = copy(ucoeffs)
     for iter in 1:flow_maxiter
-        u = coeffs_scalar(ucoeffs, lmax)
+        u = coeffs_scalar(ucoeffs, grid)
         uvals = real.(grid_values(u))
         Δu = laplacian(ops̄, u)
         Rvals = real.(exp.(-2 .* uvals) .* (R̄vals .- 2 .* grid_values(Δu)))
@@ -86,15 +86,15 @@ function uniformize(
             ),
         )
         κ = max(1.0, 1.5 * cmax)
-        area = integrate_unit(make_scalar(exp.(2 .* uvals) .* sdq̄, lmax))
+        area = integrate_unit(make_scalar(exp.(2 .* uvals) .* sdq̄, grid))
         r̄avg = 8π / area
-        δu = scalar_coeffs(make_scalar(dt .* (r̄avg .- Rvals) ./ 2, lmax))
+        δu = scalar_coeffs(make_scalar(dt .* (r̄avg .- Rvals) ./ 2, grid))
         @. δu = δu / (1 + κ * dt * ls * (ls + 1))
         ucoeffs .+= δu
         # exact area renormalization (constant shift of u)
-        u = coeffs_scalar(ucoeffs, lmax)
+        u = coeffs_scalar(ucoeffs, grid)
         uvals = real.(grid_values(u))
-        area = integrate_unit(make_scalar(exp.(2 .* uvals) .* sdq̄, lmax))
+        area = integrate_unit(make_scalar(exp.(2 .* uvals) .* sdq̄, grid))
         ucoeffs[i00] -= sqrt(4π) * log(area / 4π) / 2
         flow_iters = iter
     end
@@ -102,21 +102,21 @@ function uniformize(
     # --- Newton polish on the Liouville equation ---
     newton_iters = 0
     if use_newton
-        L = Δ̄mat === nothing ? operator_matrix(f -> laplacian(ops̄, f), lmax) : Δ̄mat
+        L = Δ̄mat === nothing ? operator_matrix(f -> laplacian(ops̄, f), grid) : Δ̄mat
         R̄half = scalar_coeffs(R̄) ./ 2
         Fnorm_prev = Inf
         for iter in 1:newton_maxiter
-            u = coeffs_scalar(ucoeffs, lmax)
+            u = coeffs_scalar(ucoeffs, grid)
             uvals = real.(grid_values(u))
             e2u = exp.(2 .* uvals)
-            F = L * ucoeffs .- R̄half .+ scalar_coeffs(make_scalar(e2u, lmax))
+            F = L * ucoeffs .- R̄half .+ scalar_coeffs(make_scalar(e2u, grid))
             Fnorm = norm(F)
             if Fnorm ≤ newton_tol * n || Fnorm > 0.5 * Fnorm_prev
                 # converged, or stalled at the aliasing/near-kernel floor
                 break
             end
             Fnorm_prev = Fnorm
-            J = L + 2 .* multiplication_matrix(make_scalar(e2u, lmax))
+            J = L + 2 .* multiplication_matrix(make_scalar(e2u, grid))
             # SVD-regularized least-squares step: the Jacobian has a
             # three-dimensional near-kernel (Möbius gauge) at the solution.
             S = svd(J)
@@ -128,14 +128,14 @@ function uniformize(
     end
 
     # Re-normalize the area of q̊ to exactly 4π
-    u = coeffs_scalar(ucoeffs, lmax)
+    u = coeffs_scalar(ucoeffs, grid)
     uvals = real.(grid_values(u))
-    areå = integrate_unit(make_scalar(exp.(2 .* uvals) .* real.(grid_values(ops̄.sqrtdetq)), lmax))
+    areå = integrate_unit(make_scalar(exp.(2 .* uvals) .* real.(grid_values(ops̄.sqrtdetq)), grid))
     uvals .-= log(areå / 4π) / 2
-    u = make_scalar(uvals, lmax)
+    u = make_scalar(uvals, grid)
 
     Δu = laplacian(ops̄, u)
     Rvals = real.(exp.(-2 .* uvals) .* (R̄vals .- 2 .* grid_values(Δu)))
-    R = make_scalar(Rvals, lmax)
+    R = make_scalar(Rvals, grid)
     return Uniformization(u, R, residual(Rvals), flow_iters, newton_iters)
 end

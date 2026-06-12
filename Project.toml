@@ -7,18 +7,21 @@ version = "1.0.0"
 AbstractSphericalHarmonics = "ee470b23-2871-4f3a-b920-8523874a9e46"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+SSHT = "f9c319a3-ff8a-48d2-8f6c-2646455c3008"
 
 [sources]
 AbstractSphericalHarmonics = {path = "../AbstractSphericalHarmonics.jl"}
 
 [compat]
+SSHT = "0.1.1 - 0.2"
 SpacetimeMetrics = "1.5"
 StaticArrays = "1"
 julia = "1.11"
 
 [extras]
+AbstractSphericalHarmonics = "ee470b23-2871-4f3a-b920-8523874a9e46"
 SpacetimeMetrics = "77e61b41-605e-43a6-b70f-04b7dcd1f572"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "SpacetimeMetrics"]
+test = ["Test", "SpacetimeMetrics", "AbstractSphericalHarmonics"]

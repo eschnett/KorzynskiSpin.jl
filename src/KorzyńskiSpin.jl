@@ -5,6 +5,7 @@
 module KorzyńskiSpin
 
 using AbstractSphericalHarmonics
+import SSHT
 using LinearAlgebra
 using StaticArrays
 

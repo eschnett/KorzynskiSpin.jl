@@ -8,19 +8,19 @@ Project out the exact part of ω: solve Δ_q g = D^a ω_a and return
 ω^inv = ω − dg (eq. 22 of Korzyński 2007: d⋆ω = 0).
 """
 function hodge_fix(ops::MetricOps, ω::Tensor{1}; Δmat::Union{Nothing,Matrix{ComplexF64}}=nothing)
-    lmax = ops.lmax
-    n = ash_nmodes(lmax)[1]
-    L = Δmat === nothing ? operator_matrix(f -> laplacian(ops, f), lmax) : Δmat
+    grid = ops.grid
+    n = ash_nmodes(grid)[1]
+    L = Δmat === nothing ? operator_matrix(f -> laplacian(ops, f), grid) : Δmat
     ρ = scalar_coeffs(divergence(ops, ω))
     # Pin the constant mode (Δ kernel): solve (L + p₀p₀ᵀ) g = ρ
-    i0 = LinearIndices((n,))[ash_mode_index(0, 0, 0, lmax)]
+    i0 = LinearIndices((n,))[ash_mode_index(grid, 0, 0, 0)]
     L̂ = copy(L)
     L̂[i0, i0] += 1
     gc = L̂ \ ρ
     gc[i0] = 0
-    g = coeffs_scalar(gc, lmax)
+    g = coeffs_scalar(gc, grid)
     dg = differential(g)
-    ωinv = Tensor{1}([SVector{2}(ω[1] - dg[1], ω[2] - dg[2]) for (ω, dg) in zip(ω.values, dg.values)], lmax)
+    ωinv = Tensor{1}([SVector{2}(ω[1] - dg[1], ω[2] - dg[2]) for (ω, dg) in zip(ω.values, dg.values)], grid)
     return ωinv, g
 end
 
@@ -29,9 +29,9 @@ end
 
 "J_i or K_i: −(1/8π) ∮ ω_a v^a ε_q  (dyad-frame contraction)"
 function momentum_integral(geom::SurfaceGeometry, ω::Tensor{1}, v::Tensor{1})
-    lmax = geom.lmax
+    grid = geom.grid
     vals = [real(sum(ω[a] * v[a] for a in 1:2)) for (ω, v) in zip(ω.values, v.values)]
-    return -1 / 8π * integrate(geom, make_scalar(vals, lmax))
+    return -1 / 8π * integrate(geom, make_scalar(vals, grid))
 end
 
 "Spin from the SO(1,3) invariants (eq. 21 of Korzyński 2007)"
@@ -81,7 +81,7 @@ function boosted_rotation_generators(gen::MobiusGenerators, β⃗::SVector{3,Flo
     n̂ = β⃗ / β
     λ = atanh(β)
     chλ, shλ = cosh(λ), sinh(λ)
-    lmax = gen.φ[1].lmax
+    grid = gen.φ[1].grid
     ε(i, j, k) = (i, j, k) in ((1, 2, 3), (2, 3, 1), (3, 1, 2)) ? 1 : ((i, j, k) in ((3, 2, 1), (1, 3, 2), (2, 1, 3)) ? -1 : 0)
     φ̃ = ntuple(3) do i
         vals = [
@@ -94,9 +94,9 @@ function boosted_rotation_generators(gen::MobiusGenerators, β⃗::SVector{3,Flo
                     end
                 end
                 v
-            end for ij in CartesianIndices(ash_grid_size(lmax))
+            end for ij in CartesianIndices(ash_grid_size(grid))
         ]
-        Tensor{1}(vals, lmax)
+        Tensor{1}(vals, grid)
     end
     return φ̃
 end
@@ -105,7 +105,7 @@ end
 # Result and driver
 
 struct SpinResult
-    lmax::Int
+    grid::SphereGrid
     "physical area of the surface"
     area::Float64
     "the spin J (eq. 21, invariant)"
@@ -152,6 +152,7 @@ function horizon_spin(
     metric3,
     excurv3;
     lmax::Int=24,
+    grid::SphereGrid=DriscollHealyGrid(lmax),
     flow_tol::Float64=1.0e-3,
     flow_maxiter::Int=10_000,
     newton_tol::Float64=1.0e-13,
@@ -160,12 +161,12 @@ function horizon_spin(
     diagnostics = Dict{Symbol,Float64}()
 
     # §3.2–3.3: geometry and rotation one-form
-    geom = surface_geometry(embedding, metric3, excurv3, lmax)
+    geom = surface_geometry(embedding, metric3, excurv3, grid)
     diagnostics[:q_imag] = imag_norm(geom.q)
 
     # Operators of the physical metric; Δ_q matrix is reused throughout
     ops = MetricOps(geom.q)
-    Δmat = operator_matrix(f -> laplacian(ops, f), lmax)
+    Δmat = operator_matrix(f -> laplacian(ops, f), grid)
 
     # §3.4: Hodge gauge fixing
     ωinv, _ = hodge_fix(ops, geom.ω; Δmat=Δmat)
@@ -182,7 +183,7 @@ function horizon_spin(
     s = geom.area / 4π
     ops̄ = MetricOps(map_fields(v -> v ./ s, geom.q))
     Δ̄mat = s .* Δmat
-    R̄ = make_scalar(s .* grid_values(R), lmax)
+    R̄ = make_scalar(s .* grid_values(R), grid)
     unif = uniformize(ops̄, R̄; Δ̄mat=Δ̄mat, flow_tol=flow_tol, flow_maxiter=flow_maxiter, newton_tol=newton_tol, use_newton=use_newton)
     diagnostics[:round_residual] = unif.residual
 
@@ -207,25 +208,25 @@ function horizon_spin(
         axis = Jvec′ / norm(Jvec′)
         φ̃ = boosted_rotation_generators(gen, β⃗)
         axial = Tensor{1}(
-            [sum(axis[i] * φ̃[i].values[ij] for i in 1:3) for ij in CartesianIndices(ash_grid_size(lmax))], lmax
+            [sum(axis[i] * φ̃[i].values[ij] for i in 1:3) for ij in CartesianIndices(ash_grid_size(grid))], grid
         )
         # Spatial axis: angular-momentum direction of the axial flow field
         # v^i = φ^a e_a^i in the embedding (exactly the rotation axis for a
         # rigid rotation; a well-defined reporting proxy in general)
         m⃗vals = [
             cross(geom.x[ij], SVector{3}(sum(real(axial.values[ij][a]) * geom.E[ij][a, i] for a in 1:2) for i in 1:3)) for
-            ij in CartesianIndices(ash_grid_size(lmax))
+            ij in CartesianIndices(ash_grid_size(grid))
         ]
-        m⃗ = SVector{3}(integrate(geom, make_scalar([m[i] for m in m⃗vals], lmax)) for i in 1:3)
+        m⃗ = SVector{3}(integrate(geom, make_scalar([m[i] for m in m⃗vals], grid)) for i in 1:3)
         axis_embedding = m⃗ / norm(m⃗)
     else
         axis = SVector(0.0, 0.0, 0.0)
         axis_embedding = SVector(0.0, 0.0, 0.0)
-        axial = Tensor{1}([zero(SVector{2,ComplexF64}) for _ in CartesianIndices(ash_grid_size(lmax))], lmax)
+        axial = Tensor{1}([zero(SVector{2,ComplexF64}) for _ in CartesianIndices(ash_grid_size(grid))], grid)
     end
 
     return SpinResult(
-        lmax, geom.area, J, Jvec, Kvec, A, B, β⃗, Jvec′, Kvec′, axis, axis_embedding, axial, geom, unif, eig, gen, ωinv,
+        grid, geom.area, J, Jvec, Kvec, A, B, β⃗, Jvec′, Kvec′, axis, axis_embedding, axial, geom, unif, eig, gen, ωinv,
         diagnostics,
     )
 end

@@ -9,7 +9,7 @@
 # are required.
 
 struct SurfaceGeometry
-    lmax::Int
+    grid::SphereGrid
     "embedding points x^i"
     x::Matrix{SVector{3,Float64}}
     "tangents E[a,i] = (∇̂_a x^i): dyad index a, Cartesian index i"
@@ -34,9 +34,9 @@ function shape_embedding(h; center::SVector{3,Float64}=SVector(0.0, 0.0, 0.0))
     end
 end
 
-function surface_geometry(embedding, metric3, excurv3, lmax::Int)
-    sz = ash_grid_size(lmax)
-    coords = grid_coords(lmax)
+function surface_geometry(embedding, metric3, excurv3, grid::SphereGrid)
+    sz = ash_grid_size(grid)
+    coords = grid_coords(grid)
 
     # Embedding points and Cauchy data at the points
     x = [SVector{3,Float64}(embedding(θϕ[1], θϕ[2])) for θϕ in coords]
@@ -44,7 +44,7 @@ function surface_geometry(embedding, metric3, excurv3, lmax::Int)
     K = [SMatrix{3,3,Float64}(excurv3(xi)) for xi in x]
 
     # Tangents E[a,i] = ∇̂_a x^i, computed spectrally component by component
-    dx = ntuple(i -> grad(make_scalar(map(v -> v[i], x), lmax)), 3)
+    dx = ntuple(i -> grad(make_scalar(map(v -> v[i], x), grid)), 3)
     for i in 1:3
         @assert imag_norm(dx[i]) < 1.0e-8 * (1 + maximum(v -> norm(v), x))
     end
@@ -52,7 +52,7 @@ function surface_geometry(embedding, metric3, excurv3, lmax::Int)
 
     # Induced metric q_ab = γ_ij E_a^i E_b^j
     qvals = [SMatrix{2,2,ComplexF64}(E[ij] * γ[ij] * transpose(E[ij])) for ij in CartesianIndices(sz)]
-    q = Tensor{2}(qvals, lmax)
+    q = Tensor{2}(qvals, grid)
 
     # Outward unit normal: σ_i = [ijk] E_1^j E_2^k annihilates the tangents;
     # normalize with γ and orient outward from the centroid.
@@ -69,14 +69,14 @@ function surface_geometry(embedding, metric3, excurv3, lmax::Int)
     end
 
     # Area density and area
-    sqrtdetq = make_scalar([sqrt(abs(det(real.(qvals[ij])))) for ij in CartesianIndices(sz)], lmax)
+    sqrtdetq = make_scalar([sqrt(abs(det(real.(qvals[ij])))) for ij in CartesianIndices(sz)], grid)
     area = integrate_unit(sqrtdetq)
 
     # Rotation one-form ω_a = −K_ij e_a^i s^j
     ωvals = [SVector{2,ComplexF64}(-(E[ij] * K[ij] * s[ij])) for ij in CartesianIndices(sz)]
-    ω = Tensor{1}(ωvals, lmax)
+    ω = Tensor{1}(ωvals, grid)
 
-    return SurfaceGeometry(lmax, x, E, s, q, sqrtdetq, area, ω)
+    return SurfaceGeometry(grid, x, E, s, q, sqrtdetq, area, ω)
 end
 
 "∮ f ε_q with the physical area form of q"
