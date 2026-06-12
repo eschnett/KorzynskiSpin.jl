@@ -13,9 +13,10 @@ gauge fixing, uniformization by two-dimensional Ricci flow with Newton
 polish, the ℓ=1 eigenfunctions of the round Laplacian, the Möbius generators
 in the original chart, and the invariants $\vec J$, $\vec K$, the spin
 $J = \sqrt{(A+\sqrt{A^2+4B^2})/2}$, the spin axis, and the axial vector
-field — is worked out in detail in [docs/algorithm.tex](docs/algorithm.tex).
-A survey of related methods is in
-[docs/related_work.tex](docs/related_work.tex).
+field — is worked out in detail in
+[docs.tex/algorithm.tex](docs.tex/algorithm.tex) (also rendered in the
+package documentation).  A survey of related methods is in
+[docs.tex/related_work.tex](docs.tex/related_work.tex).
 
 ## Usage
 
@@ -45,8 +46,7 @@ All angular derivatives are taken pseudospectrally (spin-weighted spherical
 harmonics via
 [AbstractSphericalHarmonics.jl](https://github.com/eschnett/AbstractSphericalHarmonics.jl)
 / [FastSphericalHarmonics.jl](https://github.com/eschnett/FastSphericalHarmonics.jl));
-no derivatives of the
-Cauchy data are required.
+no derivatives of the Cauchy data are required.
 
 ## Validation
 
@@ -65,12 +65,42 @@ Cauchy data are required.
   recovered, also under rotations+translations of the data, with spectral
   convergence in `lmax`.
 
-## History
+## Related work
 
-The pre-1.0 version of this package (preserved in the git history) was an
-earlier, incomplete attempt; it stalled at the construction of the rotation
-generators in distorted coordinates, which is solved here by evaluating the
-Möbius generators directly in the original chart
-($\phi_i{}^A = \mathring\epsilon^{AB}\partial_B\chi_i$,
-$\xi_i{}^A = -\mathring q^{AB}\partial_B\chi_i$; Lemma 1 in
-docs/algorithm.tex).
+To our knowledge this is the first implementation of Korzyński's
+conformal-decomposition spin; the citation record of the paper contains
+theory papers and codes that chose other spin definitions.  A detailed
+survey is in [docs.tex/related_work.tex](docs.tex/related_work.tex); in
+brief:
+
+- *Closest in spirit*: Jasiulek's invariant-integral method
+  ([arXiv:0906.1228](https://arxiv.org/abs/0906.1228)) computes
+  quasi-local spin pseudospectrally without solving a Killing equation,
+  but from moments of curvature invariants rather than conformal
+  decomposition; no public code.  Jasiulek & Korzyński's spectral
+  embedding flow ([arXiv:1111.6523](https://arxiv.org/abs/1111.6523))
+  solves the related isometric-embedding problem, not uniformization.
+- *Production codes* evaluate the same surface integral
+  $J_\phi = -\frac{1}{8\pi}\oint\omega(\phi)\,\epsilon$ with a
+  different choice of rotation vector $\phi$: SpEC uses
+  Cook–Whiting/Owen approximate Killing vectors
+  ([arXiv:0706.0199](https://arxiv.org/abs/0706.0199),
+  [arXiv:1708.07325](https://arxiv.org/abs/1708.07325)); the Einstein
+  Toolkit's
+  [QuasiLocalMeasures](https://einsteintoolkit.org/thornguide/EinsteinAnalysis/QuasiLocalMeasures/documentation.html)
+  uses Killing transport (Dreyer–Krishnan–Schnetter–Shoemaker,
+  [arXiv:gr-qc/0206008](https://arxiv.org/abs/gr-qc/0206008));
+  Caudill–Cook–Grigsby–Pfeiffer used flat-space conformal Killing
+  vectors ([arXiv:gr-qc/0605053](https://arxiv.org/abs/gr-qc/0605053)),
+  which Korzyński notes is equivalent to his definition only in special
+  cases.  Rácz's axial-vector construction
+  ([arXiv:2401.14251](https://arxiv.org/abs/2401.14251)) is a recent
+  analytic alternative.
+- *Building blocks*: surface uniformization by discrete Ricci flow is
+  standard in computational conformal geometry (Gu–Luo et al.), and the
+  eth/spin-weighted-harmonics infrastructure follows Gómez et al.
+  ([arXiv:gr-qc/9702002](https://arxiv.org/abs/gr-qc/9702002)).
+
+Since no reference implementation of this method exists, validation
+rests on analytic limits (Kerr, gauge distortions) and cross-checks
+against the other definitions on identical data.
