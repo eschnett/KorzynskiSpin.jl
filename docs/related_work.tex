@@ -1,0 +1,278 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+\newcommand{\vJ}{\vec{J}}
+\newcommand{\vK}{\vec{K}}
+
+\title{Related work: implementations of quasi-local horizon spin\\
+and of the ingredients of Korzy\'nski's conformal method}
+\author{Notes for the \texttt{KorzyńskiSpin.jl} package}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We survey the literature for existing implementations of Korzy\'nski's
+conformal-decomposition definition of quasi-local horizon angular momentum
+\cite{korzynski2007}, i.e.\ the pipeline: uniformization of the horizon
+two-metric (e.g.\ by Ricci flow), construction of the M\"obius generators,
+and evaluation of the invariants $\vJ$ and $\vK$.  To the best of our
+knowledge \emph{no published paper or public code implements this method
+end-to-end}; its citation record is small and consists of theory papers and
+of codes that adopted different spin definitions.  What does exist falls into
+three groups: a methodologically adjacent (but different) spectral method by
+Jasiulek; the approximate-Killing-vector and Killing-transport spin measures
+implemented in the SpEC and Einstein Toolkit production codes; and
+general-purpose surface-uniformization software from computational conformal
+geometry.  Consequently \texttt{KorzyńskiSpin.jl} would, as far as we can
+tell, be the first implementation, and validation must rely on analytic
+limits (Kerr, tilted slicings) and on cross-checks against the other spin
+definitions on the same data.
+\end{abstract}
+
+%==============================================================================
+\section{Summary}
+
+A search of the citation record of \cite{korzynski2007} (via Semantic
+Scholar and arXiv full-text search, June 2026) finds only a handful of
+citing works, none of which implements the method: they are reviews
+\cite{jaramillo2011,szabados2009}, theoretical developments
+\cite{racz2024,ashtekar2022,booth2007}, and numerical-relativity papers that
+cite it as an alternative while implementing approximate-Killing-vector
+measures instead \cite{owen2017,lovelace2014}.  Notably, the follow-up paper
+announced in \cite{korzynski2007} itself (``in preparation'', meant to
+contain the angular momentum flux law and the first law for non-axisymmetric
+horizons) appears never to have been published, and we found no numerical
+implementation by the author either.
+
+The remainder of these notes describes the closest relatives, ordered by
+proximity to the present algorithm.
+
+%==============================================================================
+\section{Closest relative in spirit: Jasiulek's invariant-integral method}
+
+Jasiulek \cite{jasiulek2009} computes quasi-local spin, mass and higher
+multipole moments on marginally trapped surfaces in $3+1$ simulations with a
+pseudospectral, spherical-harmonic-based method that --- like the present
+algorithm, and unlike Killing-vector approaches --- avoids solving the
+Killing equation.  The mechanism is however entirely different: spin is
+extracted from \emph{surface moments of curvature invariants} (the scalar
+2-curvature and the rotational Weyl scalar $\operatorname{Im}\Psi_2$), e.g.\
+central moments $\mu_n(\cdot) = \langle(\langle\cdot\rangle-\cdot)^n\rangle$,
+which are related algebraically to the isolated-horizon multipoles and
+inverted for the spin.  No conformal decomposition, Ricci flow, or
+Laplacian-eigenfunction construction is used (an adapted-coordinates
+transformation is introduced only for axisymmetric checks), and
+\cite{korzynski2007} is not cited.  No public code was released.  For the
+\texttt{KorzyńskiSpin.jl} test suite, the published Kerr and
+perturbed-black-hole numbers of \cite{jasiulek2009} are nevertheless a
+useful independent comparison point.
+
+Jasiulek and Korzy\'nski later developed a spectral \emph{embedding flow}
+\cite{jasiulek2012} that isometrically embeds horizon two-metrics into
+Euclidean $\mathbb{R}^3$ (Weyl's embedding problem, via a Weingarten-type
+flow).  This is methodologically adjacent --- a geometric flow on horizon
+data, solved with spherical-harmonic spectral methods --- but it solves a
+different problem (isometric embedding rather than uniformization) and
+computes no angular momentum.
+
+%==============================================================================
+\section{What production numerical-relativity codes implement instead}
+
+All widely used codes evaluate the same surface integral
+$J_\phi = -\frac{1}{8\pi G}\oint\omega(\phi)\,\epsilon$ that underlies
+\cite{korzynski2007}, but with a different prescription for the rotation
+vector $\phi$:
+
+\begin{itemize}
+\item \textbf{SpEC: approximate Killing vectors.}  The Cook--Whiting
+  construction \cite{cookwhiting2007} (further developed by Owen) finds the
+  vector field minimizing a Killing-equation residual by solving a
+  generalized eigenvalue problem on the horizon.  It is the standard spin
+  diagnostic in the SXS collaboration's SpEC code, used e.g.\ for
+  nearly extremal horizons \cite{lovelace2014} and for the systematic study
+  of \emph{spin direction} measures by Owen et al.\ \cite{owen2017}.  Both
+  papers cite \cite{korzynski2007} as an alternative definition but do not
+  implement it.
+\item \textbf{Einstein Toolkit: \texttt{QuasiLocalMeasures}.}  The
+  \texttt{QuasiLocalMeasures} thorn \cite{qlm} computes the
+  Dreyer--Krishnan--Schnetter--Shoemaker isolated-horizon spin
+  \cite{dkss2003} with Killing vectors obtained by Killing transport, or
+  with coordinate rotational vectors.
+\item \textbf{Flat-space conformal Killing vectors.}  Caudill, Cook,
+  Grigsby and Pfeiffer \cite{caudill2006} used the rotational Killing
+  vectors of the flat conformal background in initial-data spin
+  measurements; \cite{korzynski2007} notes explicitly that this is
+  equivalent to the conformal-decomposition definition in many special
+  cases, but not in general (no invariance discussion, no gauge fixing of
+  $\omega$).
+\item \textbf{R\'acz's axial vector construction.}  A recent alternative
+  \cite{racz2024} constructs axial vector fields from
+  ``centre-of-mass'' unit-sphere reference systems; interestingly it also
+  imposes $\ell=1$-type conditions on reference functions on the sphere,
+  conceptually close to the eigenfunction triple $\chi_i$ of the present
+  algorithm.  It cites \cite{korzynski2007}, is purely analytic, and has no
+  accompanying software that we could find.
+\end{itemize}
+
+%==============================================================================
+\section{Building blocks that exist as software}
+
+The individual ingredients of the algorithm are all available, just never
+assembled for this purpose:
+
+\begin{itemize}
+\item \textbf{Uniformization.}  Discrete surface Ricci flow and spherical
+  conformal parameterization are mature topics in computational conformal
+  geometry (Gu, Luo and collaborators \cite{gu2008}; various public
+  MATLAB/Python spherical-conformal-map tools).  These solve exactly the
+  ``round representative plus conformal factor'' problem, but for triangle
+  meshes rather than spectrally, and know nothing of $\omega$, $\vJ$,
+  $\vK$.
+\item \textbf{Spectral horizon machinery.}  The $\eth$-formalism
+  \cite{gomez1997} and fast spin-weighted spherical-harmonic transforms
+  (e.g.\ the \texttt{FastSphericalHarmonics} Julia package) provide the
+  pole-regular derivative and quadrature infrastructure; the pre-1.0
+  prototype of this package implemented the curvature computation of
+  a horizon two-metric in this framework but did not reach the flow,
+  eigenfunction, or invariant stages.
+\item \textbf{The rotation one-form integral.}  The integrand
+  $K_{ij}\phi^i s^j$ is implemented in every isolated-horizon spin
+  diagnostic \cite{dkss2003,qlm}; only the choice of $\phi$ differs.
+\end{itemize}
+
+%==============================================================================
+\section{Consequences for validation}
+
+Since no reference implementation of \cite{korzynski2007} exists, the test
+strategy of the companion document \texttt{algorithm.tex} cannot include a
+code-to-code comparison of the method itself.  The available external
+anchors are:
+\begin{enumerate}
+\item analytic limits: Kerr ($J=Ma$, axis along the symmetry axis,
+  $\vK=0$ after gauge fixing), Schwarzschild and gauge-distorted
+  Schwarzschild ($J=0$);
+\item the tilted-slicing Kerr test proposed in \cite{korzynski2007} itself,
+  which exercises the Hodge gauge fixing;
+\item cross-checks against \emph{other} spin definitions on identical data:
+  approximate-Killing-vector spin (SpEC-style \cite{cookwhiting2007}),
+  Killing-transport spin (\texttt{QuasiLocalMeasures} \cite{qlm}), and
+  Jasiulek's published values \cite{jasiulek2009} --- agreement is expected
+  for nearly axisymmetric horizons, with quantifiable differences in
+  strongly distorted regimes where the definitions genuinely differ.
+\end{enumerate}
+
+\begin{thebibliography}{99}
+
+\bibitem{korzynski2007}
+M.~Korzy\'nski,
+\emph{Quasi-local angular momentum of non-symmetric isolated and dynamical
+horizons from the conformal decomposition of the metric},
+Class.\ Quantum Grav.\ \textbf{24}, 5935 (2007);
+\href{https://arxiv.org/abs/0707.2824}{arXiv:0707.2824 [gr-qc]}.
+
+\bibitem{jasiulek2009}
+M.~Jasiulek,
+\emph{A new method to compute quasi-local spin and other invariants on
+marginally trapped surfaces},
+Class.\ Quantum Grav.\ \textbf{26}, 245008 (2009);
+\href{https://arxiv.org/abs/0906.1228}{arXiv:0906.1228 [gr-qc]}.
+
+\bibitem{jasiulek2012}
+M.~Jasiulek, M.~Korzy\'nski,
+\emph{Isometric embeddings of 2-spheres by embedding flow for applications
+in numerical relativity},
+Class.\ Quantum Grav.\ \textbf{29}, 155010 (2012);
+\href{https://arxiv.org/abs/1111.6523}{arXiv:1111.6523 [gr-qc]}.
+
+\bibitem{cookwhiting2007}
+G.~B.~Cook, B.~F.~Whiting,
+\emph{Approximate Killing vectors on $S^2$},
+Phys.\ Rev.\ D \textbf{76}, 041501(R) (2007);
+\href{https://arxiv.org/abs/0706.0199}{arXiv:0706.0199 [gr-qc]}.
+
+\bibitem{owen2017}
+R.~Owen, A.~S.~Fox, J.~A.~Freiberg, T.~Pierre Jacques,
+\emph{Black hole spin axis in numerical relativity},
+Phys.\ Rev.\ D \textbf{99}, 084031 (2019);
+\href{https://arxiv.org/abs/1708.07325}{arXiv:1708.07325 [gr-qc]}.
+
+\bibitem{lovelace2014}
+G.~Lovelace et al.,
+\emph{Nearly extremal apparent horizons in simulations of merging black
+holes},
+Class.\ Quantum Grav.\ \textbf{32}, 065007 (2015);
+\href{https://arxiv.org/abs/1411.7297}{arXiv:1411.7297 [gr-qc]}.
+
+\bibitem{dkss2003}
+O.~Dreyer, B.~Krishnan, E.~Schnetter, D.~Shoemaker,
+\emph{Introduction to isolated horizons in numerical relativity},
+Phys.\ Rev.\ D \textbf{67}, 024018 (2003);
+\href{https://arxiv.org/abs/gr-qc/0206008}{arXiv:gr-qc/0206008}.
+
+\bibitem{qlm}
+E.~Schnetter et al.,
+\texttt{QuasiLocalMeasures} thorn, Einstein Toolkit;
+\url{https://einsteintoolkit.org/thornguide/EinsteinAnalysis/QuasiLocalMeasures/documentation.html}.
+
+\bibitem{caudill2006}
+M.~Caudill, G.~B.~Cook, J.~D.~Grigsby, H.~P.~Pfeiffer,
+\emph{Circular orbits and spin in black-hole initial data},
+Phys.\ Rev.\ D \textbf{74}, 064011 (2006);
+\href{https://arxiv.org/abs/gr-qc/0605053}{arXiv:gr-qc/0605053}.
+
+\bibitem{racz2024}
+I.~R\'acz,
+\emph{Quasi-local spin-angular momentum and the construction of axial
+vector fields},
+Phys.\ Rev.\ D (2025);
+\href{https://arxiv.org/abs/2401.14251}{arXiv:2401.14251 [gr-qc]}.
+
+\bibitem{ashtekar2022}
+A.~Ashtekar, N.~Khera, M.~Kolanowski, J.~Lewandowski,
+\emph{Non-expanding horizons: multipoles and the symmetry group},
+JHEP \textbf{01} (2022) 028;
+\href{https://arxiv.org/abs/2111.07873}{arXiv:2111.07873 [gr-qc]}.
+
+\bibitem{booth2007}
+I.~Booth, S.~Fairhurst,
+\emph{Extremality conditions for isolated and dynamical horizons},
+Phys.\ Rev.\ D \textbf{77}, 084005 (2008);
+\href{https://arxiv.org/abs/0708.2209}{arXiv:0708.2209 [gr-qc]}.
+
+\bibitem{jaramillo2011}
+J.~L.~Jaramillo,
+\emph{An introduction to local black hole horizons in the 3+1 approach to
+general relativity},
+Int.\ J.\ Mod.\ Phys.\ D \textbf{20}, 2169 (2011);
+\href{https://arxiv.org/abs/1108.2408}{arXiv:1108.2408 [gr-qc]}.
+
+\bibitem{szabados2009}
+L.~B.~Szabados,
+\emph{Quasi-local energy-momentum and angular momentum in general
+relativity},
+Living Rev.\ Relativity \textbf{12}, 4 (2009);
+\href{https://doi.org/10.12942/lrr-2009-4}{DOI:10.12942/lrr-2009-4}.
+
+\bibitem{gu2008}
+X.~D.~Gu, S.-T.~Yau,
+\emph{Computational Conformal Geometry},
+Advanced Lectures in Mathematics 3, International Press (2008);
+see also M.~Jin, J.~Kim, F.~Luo, X.~Gu,
+\emph{Discrete surface Ricci flow},
+IEEE Trans.\ Vis.\ Comput.\ Graphics \textbf{14}, 1030 (2008).
+
+\bibitem{gomez1997}
+R.~G\'omez, L.~Lehner, P.~Papadopoulos, J.~Winicour,
+\emph{The eth formalism in numerical relativity},
+Class.\ Quantum Grav.\ \textbf{14}, 977 (1997);
+\href{https://arxiv.org/abs/gr-qc/9702002}{arXiv:gr-qc/9702002}.
+
+\end{thebibliography}
+
+\end{document}

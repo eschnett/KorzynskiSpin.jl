@@ -1,0 +1,1132 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+\newtheorem{lemma}{Lemma}
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+
+% --- macros ---------------------------------------------------------------
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\ee}{\mathrm{e}}
+\newcommand{\Lie}{\mathcal{L}}
+\newcommand{\qo}{\mathring{q}}          % unit-round metric
+\newcommand{\epso}{\mathring{\epsilon}} % its area form
+\newcommand{\Do}{\mathring{D}}          % its covariant derivative
+\newcommand{\Lapo}{\mathring{\Delta}}   % its Laplacian
+\newcommand{\vJ}{\vec{J}}
+\newcommand{\vK}{\vec{K}}
+\newcommand{\vbeta}{\vec{\beta}}
+\newcommand{\vn}{\hat{n}}
+\newcommand{\bareth}{\bar{\eth}}   % \eth itself comes from amssymb
+\newcommand{\atantwo}{\operatorname{atan2}}
+\newcommand{\artanh}{\operatorname{artanh}}
+% --------------------------------------------------------------------------
+
+\title{Computing the quasi-local spin of a distorted horizon:\\
+a detailed algorithm based on Korzy\'nski's conformal decomposition}
+\author{Notes for the \texttt{KorzyńskiSpin.jl} package}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Korzy\'nski \cite{korzynski2007} defines the quasi-local angular momentum of a
+non-axisymmetric marginally outer trapped surface (MOTS) through the conformal
+decomposition of its two-metric and the action of the M\"obius group of the
+sphere.  These notes turn that definition into a concrete numerical algorithm:
+starting from the shape function $h(\theta,\varphi)$ of an apparent horizon and
+the Cauchy data $(\gamma_{ij},K_{ij})$ at its collocation points, we construct
+the induced two-metric, the rotation one-form, uniformize the metric by
+two-dimensional Ricci flow, obtain the M\"obius generators directly in the
+original coordinates from the first eigenfunctions of the round Laplacian, and
+evaluate the invariants $\vJ$ and $\vK$ (eqs.\ (12) and (13) of
+\cite{korzynski2007}), the spin $J$, the spin axis, and the axial vector field
+$\phi$.  We work out every formula needed for a pseudospectral implementation
+based on spin-weighted spherical harmonics, and we collect the corrections and
+simplifications relative to the algorithm skeleton in \texttt{GOAL.md}; the
+most important one is that no explicit ``good'' coordinate system needs to be
+constructed and the Ricci flow never needs to be ``undone''.
+\end{abstract}
+
+\tableofcontents
+
+%==============================================================================
+\section{Notation and conventions}
+\label{sec:conventions}
+
+\begin{itemize}
+\item Spacetime signature $({-}{+}{+}{+})$; geometric units $c=1$; we keep
+  Newton's constant $G$ explicit (set $G=1$ in code).
+\item Greek indices $\mu,\nu,\dots$ are four-dimensional, lower-case Latin
+  indices $i,j,k,\dots$ are spatial (three-dimensional), capital Latin indices
+  $A,B,C,\dots$ are two-dimensional indices on the horizon surface
+  $\Delta\simeq S^2$, with coordinates $(\theta,\varphi)$.
+\item $\gamma_{ij}$ is the spatial metric of the Cauchy slice $\Sigma$,
+  $n^\mu$ its future-pointing unit normal, and the extrinsic curvature uses
+  the ADM/numerical-relativity sign convention
+  \begin{equation}
+    K_{ij} \;=\; -\tfrac12 \Lie_n \gamma_{ij}
+            \;=\; -\gamma_i{}^\mu \gamma_j{}^\nu \nabla_\mu n_\nu .
+    \label{eq:Kconvention}
+  \end{equation}
+  With the opposite (Wald) convention all components of $\vJ$ and $\vK$, and
+  the axial vector $\phi$, flip sign, while $J=|\vJ|$ is unaffected.
+\item $q_{AB}$ is the induced (positive definite) metric on $\Delta$, $D_A$
+  its Levi-Civita connection, $\Delta_q$ its Laplace--Beltrami operator,
+  $\epsilon_{AB}$ its area two-form, and $R[q]$ its Ricci scalar
+  ($R=2K_{\mathrm{Gauss}}$; for the unit round sphere $R=2$).
+\item The chart $(\theta,\varphi)$ is assumed right-handed as seen from
+  outside the surface, and we orient $\epsilon_{AB}$ such that
+  $\epsilon_{\theta\varphi}=+\sqrt{\det q}>0$.  Reversing the orientation
+  flips $\vJ$, $\vK$ and $\phi$.
+\item A ring denotes quantities of the \emph{unit-round representative}
+  $\qo_{AB}$ produced by the Ricci flow (area $4\pi$, $R[\qo]=2$):
+  $\epso_{AB}$, $\Do_A$, $\Lapo$.  A hat denotes quantities of the
+  \emph{unit coordinate sphere} $\hat q = \dd\theta^2 +
+  \sin^2\!\theta\,\dd\varphi^2$ in the given chart, which serves only as a
+  pseudospectral bookkeeping device (Section~\ref{sec:numerics}); $\hat q$ is
+  \emph{not} in general conformal to $q$ in this chart.
+\item In two dimensions we use repeatedly, for $\tilde q = \ee^{2u} q$,
+  \begin{equation}
+    \tilde\epsilon_{AB} = \ee^{2u}\epsilon_{AB},\qquad
+    \Delta_{\tilde q} f = \ee^{-2u}\Delta_q f,\qquad
+    R[\tilde q] = \ee^{-2u}\bigl(R[q] - 2\Delta_q u\bigr),
+    \label{eq:confidentities}
+  \end{equation}
+  the identities $\epsilon_A{}^C \epsilon_C{}^B = -\delta_A^B$,
+  $\epsilon^{AC}\epsilon_{BC} = \delta^A_B$, and the conformal invariance of
+  the Hodge star on one-forms, $(\star\alpha)_A = \epsilon_A{}^B \alpha_B$,
+  which is unchanged under $q \to \ee^{2u} q$.
+\end{itemize}
+
+%==============================================================================
+\section{Korzy\'nski's definition of angular momentum}
+\label{sec:theory}
+
+This section summarizes the parts of \cite{korzynski2007} that the algorithm
+implements; equation numbers in parentheses refer to that paper.
+
+\subsection{MOTS geometry and the rotation one-form}
+
+A MOTS $\Delta$ carries the metric $q_{AB}$, the area form $\epsilon$, and the
+\emph{rotation one-form}
+\begin{equation}
+  \omega_A \;=\; -\bigl(\nabla_A l^\mu\bigr) k_\mu
+          \;=\; \bigl(\nabla_A k^\mu\bigr) l_\mu ,
+  \qquad l^\mu k_\mu = -1,
+  \label{eq:omegadef}
+\end{equation}
+where $l^\mu,k^\mu$ are the outgoing and ingoing null normals (paper eq.~(1)).
+Under a rescaling $l\to C\,l$, $k\to C^{-1}k$ (equivalently: a change of the
+slicing through $\Delta$) the rotation form changes by a gradient,
+\begin{equation}
+  \omega_A \;\to\; \omega_A + \partial_A \ln C .
+  \label{eq:omegagauge}
+\end{equation}
+Every standard definition of quasi-local angular momentum has the form (paper
+eq.~(2))
+\begin{equation}
+  J_\phi \;=\; -\frac{1}{8\pi G}\int_\Delta \omega(\phi)\,\epsilon
+  \label{eq:Jphi}
+\end{equation}
+for some \emph{axial} vector field $\phi$ on $\Delta$ (two poles, closed
+orbits, affine parameter period $2\pi$).  The entire problem is the choice of
+$\phi$ when $\Delta$ has no symmetry.
+
+\subsection{Conformally spherical coordinates and the M\"obius group}
+
+On any oriented $(S^2,q)$ there exist global \emph{conformally spherical
+coordinates} (CSCS) $(\theta,\varphi)$ in which
+\begin{equation}
+  q \;=\; F(\theta,\varphi)\,\bigl(\dd\theta^2 + \sin^2\!\theta\,
+  \dd\varphi^2\bigr),
+  \qquad F>0
+  \label{eq:cscs}
+\end{equation}
+(uniformization; constructible by Ricci flow
+\cite{hamilton1988,chow1991}).  Such coordinates are unique only up to the
+six-parameter M\"obius group, the connected component of $SO(1,3)$, generated
+by the three rotations
+\begin{equation}
+  \begin{aligned}
+    \phi_1 &= -\sin\varphi\,\partial_\theta
+              - \cot\theta\,\cos\varphi\,\partial_\varphi,\\
+    \phi_2 &= \phantom{-}\cos\varphi\,\partial_\theta
+              - \cot\theta\,\sin\varphi\,\partial_\varphi,\\
+    \phi_3 &= \partial_\varphi,
+  \end{aligned}
+  \label{eq:phigen}
+\end{equation}
+and the three proper conformal generators
+\begin{equation}
+  \begin{aligned}
+    \xi_1 &= -\cos\theta\,\cos\varphi\,\partial_\theta
+             + \frac{\sin\varphi}{\sin\theta}\,\partial_\varphi,\\
+    \xi_2 &= -\cos\theta\,\sin\varphi\,\partial_\theta
+             - \frac{\cos\varphi}{\sin\theta}\,\partial_\varphi,\\
+    \xi_3 &= \phantom{-}\sin\theta\,\partial_\theta,
+  \end{aligned}
+  \label{eq:xigen}
+\end{equation}
+with commutators $[\phi_i,\phi_j] = -\epsilon_{ijk}\phi_k$,
+$[\xi_i,\xi_j] = +\epsilon_{ijk}\phi_k$,
+$[\xi_i,\phi_j] = -\epsilon_{ijk}\xi_k$.
+Every unit combination $n_i\phi_i$ ($n_in_i=1$) is axial; no combination of
+the $\xi_i$ is.
+
+The finite action of the proper conformal transformation generated by
+$\lambda\, n_i \xi_i$ ($n_i n_i = 1$, $\lambda\in\mathbb{R}$) on the
+generators themselves is (paper eqs.~(10)--(11))
+\begin{equation}
+  \begin{aligned}
+    \tilde\phi_i &= n_i\,(n_k\phi_k)
+      + \cosh\lambda\,\bigl(\phi_i - n_i\,(n_k\phi_k)\bigr)
+      + \sinh\lambda\;\epsilon_{ijk}\,n_j\,\xi_k,\\
+    \tilde\xi_i &= n_i\,(n_k\xi_k)
+      + \cosh\lambda\,\bigl(\xi_i - n_i\,(n_k\xi_k)\bigr)
+      - \sinh\lambda\;\epsilon_{ijk}\,n_j\,\phi_k .
+  \end{aligned}
+  \label{eq:finitegen}
+\end{equation}
+
+\subsection{The invariants \texorpdfstring{$\vJ$ and $\vK$}{J and K}}
+
+Given a CSCS one defines the two triples (paper eqs.~(12)--(13))
+\begin{equation}
+  \boxed{\;
+  J_i = -\frac{1}{8\pi G}\int_\Delta \omega(\phi_i)\,\epsilon,
+  \qquad
+  K_i = -\frac{1}{8\pi G}\int_\Delta \omega(\xi_i)\,\epsilon .
+  \;}
+  \label{eq:JKdef}
+\end{equation}
+Note that $\epsilon$ is the \emph{physical} area form of $q$, while $\phi_i$
+and $\xi_i$ are the round-sphere generators \eqref{eq:phigen}--\eqref{eq:xigen}
+of the chosen CSCS.  Under the rotation subgroup $SO(3)$, $\vJ$ and $\vK$
+rotate as Euclidean 3-vectors.  Under the proper conformal transformation
+\eqref{eq:finitegen}, with
+$\vbeta = \tanh\lambda\;\vn$, $\gamma = (1-\beta^2)^{-1/2}$,
+they transform exactly like the electric and magnetic fields under a Lorentz
+boost (paper eqs.~(14)--(15)):
+\begin{equation}
+  \begin{aligned}
+    \vJ' &= \gamma\bigl(\vJ + \vbeta\times\vK\bigr)
+            - \frac{\gamma^2}{\gamma+1}\,\vbeta\,(\vbeta\cdot\vJ),\\
+    \vK' &= \gamma\bigl(\vK - \vbeta\times\vJ\bigr)
+            - \frac{\gamma^2}{\gamma+1}\,\vbeta\,(\vbeta\cdot\vK).
+  \end{aligned}
+  \label{eq:boost}
+\end{equation}
+The two $SO(1,3)$ invariants are (paper eqs.~(16)--(17))
+\begin{equation}
+  A = |\vJ|^2 - |\vK|^2, \qquad B = \vK\cdot\vJ .
+  \label{eq:AB}
+\end{equation}
+
+\subsection{Spin, axial vector, and gauge fixing}
+\label{sec:spindef}
+
+If $A^2+B^2>0$ there is a proper conformal transformation making $\vJ$ and
+$\vK$ parallel (or one of them zero): take
+\begin{equation}
+  \vbeta = \beta\,\frac{\vJ\times\vK}{|\vJ\times\vK|},
+  \qquad
+  \beta^2 - S\,\beta + 1 = 0,\quad
+  S = \frac{|\vJ|^2+|\vK|^2}{|\vJ\times\vK|},
+  \qquad
+  \beta = \frac{S - \sqrt{S^2-4}}{2}\in(0,1)
+  \label{eq:betacondition}
+\end{equation}
+(the root with $0<\beta<1$; note $S\ge 2$ always, by
+$|\vJ|^2+|\vK|^2 \ge 2|\vJ||\vK| \ge 2|\vJ\times\vK|$).  In the resulting
+frame the spin and axial vector are defined as (paper Definition and
+eq.~(18))
+\begin{equation}
+  J = |\vJ'|,
+  \qquad
+  \phi = \frac{J'_i}{|\vJ'|}\,\tilde\phi_i
+  \quad (\text{or } \phi = \tfrac{K'_i}{|\vK'|}\,\tilde\phi_i
+  \text{ if } \vJ'=0).
+  \label{eq:axialvector}
+\end{equation}
+Equivalently, and more conveniently, $J$ has the manifestly
+$SO(1,3)$-invariant form (paper eq.~(21))
+\begin{equation}
+  \boxed{\;
+  J = \sqrt{\frac{A + \sqrt{A^2 + 4B^2}}{2}} .
+  \;}
+  \label{eq:Jinvariant}
+\end{equation}
+For $\vK=0$ this reduces to $J=|\vJ|$, as it must.  If $A=B=0$ (the ``plane
+wave'' case) then $J=0$ and no axis exists.
+
+Finally, because of the gauge freedom \eqref{eq:omegagauge} the paper fixes
+the normalization of the null normals by requiring that in the Hodge
+decomposition
+\begin{equation}
+  \omega = \star\,\dd f + \dd g
+  \label{eq:hodge}
+\end{equation}
+the exact part vanishes, $\dd g = 0$, i.e.\ $\dd{\star}\omega = 0$ (paper
+eq.~(22)).  Since $\star$ on one-forms is conformally invariant, the
+decomposition is the same with respect to $q$ and $\qo$.  In practice one
+never rescales the normals: one simply replaces $\omega$ by its co-exact part
+\begin{equation}
+  \omega^{\mathrm{inv}} = \star\,\dd f = \omega - \dd g
+  \label{eq:omegainv}
+\end{equation}
+in \eqref{eq:JKdef}.  This gauge fixing is what makes the result independent
+of the choice of Cauchy slicing through the horizon (e.g.\ tilted slicings of
+Kerr).
+
+%==============================================================================
+\section{The algorithm in detail}
+\label{sec:algorithm}
+
+\subsection{Inputs}
+\label{sec:inputs}
+
+\begin{enumerate}
+\item A centre $c^i$ and a shape function $h(\theta,\varphi)>0$, given by
+  spherical-harmonic coefficients, such that the horizon is
+  \begin{equation}
+    x^i(\theta,\varphi) = c^i + h(\theta,\varphi)\,\hat r^i(\theta,\varphi),
+    \qquad
+    \hat r^i = (\sin\theta\cos\varphi,\;\sin\theta\sin\varphi,\;\cos\theta),
+    \label{eq:embedding}
+  \end{equation}
+  i.e.\ the surface is star-shaped about $c^i$ (as produced by
+  \texttt{ApparentHorizonFinder}).
+\item The spatial metric $\gamma_{ij}$ and extrinsic curvature $K_{ij}$
+  evaluated at the collocation points $x^i(\theta_p,\varphi_p)$ of a
+  spin-weighted spherical-harmonic grid.
+\end{enumerate}
+
+\begin{remark}
+No spatial \emph{derivatives} of $\gamma_{ij}$ or $K_{ij}$ are needed:
+all derivatives that enter the algorithm are tangential to the surface and are
+taken pseudospectrally on the sphere.  If $\partial_k\gamma_{ij}$ is available
+it can be used for an independent cross-check of the spectral derivatives of
+$q_{AB}$.
+\end{remark}
+
+\subsection{Surface geometry}
+\label{sec:surface}
+
+The tangent vectors and induced metric are
+\begin{equation}
+  e_A{}^i = \partial_A x^i
+          = (\partial_A h)\,\hat r^i + h\,\partial_A \hat r^i,
+  \qquad
+  q_{AB} = \gamma_{ij}\, e_A{}^i e_B{}^j .
+  \label{eq:inducedmetric}
+\end{equation}
+The angular derivatives $\partial_A h$ are evaluated spectrally from the
+spherical-harmonic coefficients of $h$.  The area form and the physical area
+are
+\begin{equation}
+  \epsilon_{AB} = \sqrt{\det q}\;\bigl(\dd\theta\wedge\dd\varphi\bigr)_{AB},
+  \qquad
+  \mathcal{A} = \oint_\Delta \epsilon
+             = \int_0^\pi\!\!\int_0^{2\pi} \sqrt{\det q}\;
+               \dd\theta\,\dd\varphi .
+  \label{eq:areaform}
+\end{equation}
+The outward unit normal of $\Delta$ within $\Sigma$ is obtained without any
+derivatives of $\gamma$: the covector
+\begin{equation}
+  \sigma_i = [ijk]\, e_\theta{}^j e_\varphi{}^k
+  \qquad (\text{$[ijk]$ the flat permutation symbol})
+  \label{eq:normalcovector}
+\end{equation}
+annihilates both tangents (this requires no metric), and
+\begin{equation}
+  s^i = \frac{\gamma^{ij}\sigma_j}
+             {\sqrt{\gamma^{kl}\sigma_k\sigma_l}},
+  \qquad \text{sign fixed by } s^i\,\bigl(x_i - c_i\bigr) > 0 .
+  \label{eq:unitnormal}
+\end{equation}
+
+\subsection{The rotation one-form from ADM data}
+\label{sec:omega}
+
+Let $n^\mu$ be the future unit normal of $\Sigma$ and $s^\mu$ the outward
+unit normal of $\Delta$ in $\Sigma$, and set
+\begin{equation}
+  l^\mu = \tfrac{1}{\sqrt2}\,(n^\mu + s^\mu),
+  \qquad
+  k^\mu = \tfrac{1}{\sqrt2}\,(n^\mu - s^\mu),
+  \qquad l^\mu k_\mu = -1 .
+\end{equation}
+Inserting these into \eqref{eq:omegadef} and using
+$n_\mu \nabla_\nu n^\mu = s_\mu \nabla_\nu s^\mu = 0$ and
+$n_\mu \nabla_\nu s^\mu = - s^\mu \nabla_\nu n_\mu$ (from $n\cdot s=0$),
+\begin{equation}
+  \omega_A
+  = -\tfrac12\, e_A{}^\nu (n-s)_\mu \nabla_\nu (n+s)^\mu
+  = e_A{}^\nu s^\mu \nabla_\nu n_\mu .
+\end{equation}
+Both $e_A$ and $s$ are tangent to $\Sigma$, so with the convention
+\eqref{eq:Kconvention},
+\begin{equation}
+  \boxed{\;
+  \omega_A = -\,K_{ij}\, e_A{}^i s^j .
+  \;}
+  \label{eq:omegaADM}
+\end{equation}
+Consequently \eqref{eq:Jphi} becomes
+$J_\phi = \frac{1}{8\pi G}\oint K_{ij}\,\phi^i s^j\,\epsilon$ with
+$\phi^i = \phi^A e_A{}^i$, which is the familiar isolated-horizon /
+Brown--York integrand of \cite{dkss2003}.  Note that the constant boost
+factor $1/\sqrt2$ in $(l,k)$ is pure gauge \eqref{eq:omegagauge} and drops
+out after the Hodge projection below; \eqref{eq:omegaADM} holds for any
+constant normalization.
+
+\subsection{Gauge fixing: Hodge decomposition of \texorpdfstring{$\omega$}{omega}}
+\label{sec:hodge}
+
+On $S^2$ there are no harmonic one-forms, so \eqref{eq:hodge} is the complete
+Hodge decomposition.  Taking the divergence of \eqref{eq:hodge} and using
+$D^A(\epsilon_A{}^B D_B f) = \epsilon^{AB} D_A D_B f = 0$,
+\begin{equation}
+  \Delta_q\, g = D^A \omega_A
+  = \frac{1}{\sqrt{\det q}}\,\partial_A
+    \bigl(\sqrt{\det q}\; q^{AB} \omega_B\bigr),
+  \label{eq:hodgesolve}
+\end{equation}
+a Poisson equation with zero-mean right-hand side, solved (up to an
+irrelevant constant) pseudospectrally, after which
+\begin{equation}
+  \omega^{\mathrm{inv}}_A = \omega_A - \partial_A g .
+\end{equation}
+Because $\star$ on one-forms and the splitting
+exact\,$\oplus$\,co-exact are conformally invariant, solving
+\eqref{eq:hodgesolve} with $q$ or with $\qo$ gives the same $g$ --- a useful
+consistency check.  The potential $f$ is not needed.
+
+\begin{remark}
+This step cannot be skipped.  The fields $\phi_i$ are divergence-free with
+respect to the \emph{round} area form $\epso$, but not with respect to the
+physical $\epsilon = F\,\epso$; hence
+$\oint (\dd g)(\phi_i)\,\epsilon = -\oint g\,\phi_i(\ln F)\,\epsilon \ne 0$
+in general, and without the projection the $J_i$ would depend on the slicing
+through the horizon.
+\end{remark}
+
+\subsection{Ricci scalar of the two-metric}
+\label{sec:ricciscalar}
+
+The flow in Section~\ref{sec:ricciflow} needs $R[q]$.  In any chart,
+\begin{equation}
+  \Gamma^C_{AB} = \tfrac12\, q^{CD}\bigl(\partial_A q_{DB}
+                  + \partial_B q_{AD} - \partial_D q_{AB}\bigr),
+  \qquad
+  R = q^{AB}\bigl(\partial_C\Gamma^C_{AB} - \partial_A\Gamma^C_{CB}
+      + \Gamma^C_{CD}\Gamma^D_{AB} - \Gamma^C_{AD}\Gamma^D_{CB}\bigr).
+  \label{eq:Rcoord}
+\end{equation}
+Coordinate components of $q_{AB}$ are singular at the poles of the chart, so
+in practice \eqref{eq:Rcoord} is evaluated in the spin-weighted form of
+Section~\ref{sec:numerics}: with $\hat\nabla$ the connection of the unit
+coordinate sphere $\hat q$ and
+\begin{equation}
+  C^A_{BC} = \tfrac12\, q^{AD}\bigl(\hat\nabla_B q_{DC}
+             + \hat\nabla_C q_{BD} - \hat\nabla_D q_{BC}\bigr)
+  \label{eq:Cdiff}
+\end{equation}
+(a globally regular tensor field),
+\begin{equation}
+  R[q] = q^{AB}\Bigl(\hat q_{AB}
+         + \hat\nabla_C C^C_{AB} - \hat\nabla_A C^C_{CB}
+         + C^C_{CD} C^D_{AB} - C^C_{AD} C^D_{CB}\Bigr),
+  \label{eq:Reth}
+\end{equation}
+where $\hat R_{AB} = \hat q_{AB}$ is the Ricci tensor of the unit sphere.
+Similarly, for any scalar $f$,
+\begin{equation}
+  \Delta_q f = q^{AB}\bigl(\hat\nabla_A\hat\nabla_B f
+               - C^C_{AB}\,\partial_C f\bigr).
+  \label{eq:lapeth}
+\end{equation}
+
+\subsection{Uniformization by normalized Ricci flow}
+\label{sec:ricciflow}
+
+First rescale to unit area: let
+\begin{equation}
+  \bar q_{AB} = \frac{4\pi}{\mathcal{A}}\, q_{AB},
+  \qquad \oint \bar\epsilon = 4\pi,
+\end{equation}
+so that by Gauss--Bonnet the average curvature is
+$\bar R_{\mathrm{avg}} = 2$.  In two dimensions $R_{AB} = \tfrac12 R\,
+q_{AB}$, so the normalized Ricci flow
+\begin{equation}
+  \partial_t\, q_{AB}(t) = \bigl(2 - R(t)\bigr)\, q_{AB}(t),
+  \qquad q(0) = \bar q,
+  \label{eq:ricciflow}
+\end{equation}
+preserves the conformal class \emph{and} the total area: writing
+$q(t) = \ee^{2u(t)}\bar q$ and using \eqref{eq:confidentities},
+\eqref{eq:ricciflow} is the single scalar parabolic equation
+\begin{equation}
+  \boxed{\;
+  \partial_t u = 1 - \tfrac12 R(t),
+  \qquad
+  R(t) = \ee^{-2u}\bigl(\bar R - 2\bar\Delta u\bigr),
+  \qquad u(0)=0,
+  \;}
+  \label{eq:flowscalar}
+\end{equation}
+with $\bar R = R[\bar q]$ and $\bar\Delta = \Delta_{\bar q}$ computed once via
+\eqref{eq:Reth}--\eqref{eq:lapeth}.  By Hamilton and Chow
+\cite{hamilton1988,chow1991} the flow exists for all $t$ and converges
+exponentially, for \emph{any} initial metric on $S^2$, to the constant
+curvature metric: $u(t)\to u_\infty$ with
+\begin{equation}
+  \qo_{AB} = \ee^{2u_\infty}\,\bar q_{AB},
+  \qquad R[\qo] = 2,\qquad \oint\epso = 4\pi .
+\end{equation}
+This $\qo$ is the unit-round representative of the conformal class of $q$,
+expressed in the original chart.  Equivalently, the conformal factor of
+\eqref{eq:cscs} is $F = (\mathcal{A}/4\pi)\,\ee^{-2u_\infty}$.
+
+\paragraph{Time integration.}
+The linearization of \eqref{eq:flowscalar} is
+$\partial_t\,\delta u = \ee^{-2u}\bar\Delta\,\delta u - R(t)\,\delta u$,
+so explicit integrators need
+$\Delta t \lesssim c\,\min(\ee^{2u})\,/\,\ell_{\max}(\ell_{\max}+1)$
+(times the smallest eigenvalue scale of $\bar q$ relative to $\hat q$); an
+adaptive explicit Runge--Kutta scheme is adequate at moderate resolution.  At
+high $\ell_{\max}$ use an IMEX or exponential integrator, treating the
+constant-coefficient operator $\Lambda = \hat\Delta$ (diagonal in the
+spherical-harmonic basis, eigenvalues $-\ell(\ell+1)$) implicitly and the
+remainder $1 - \tfrac12 R - \kappa\hat\Delta u$ explicitly, with a constant
+$\kappa \approx \max(\ee^{-2u}\,\lambda_{\bar q})$ chosen for stability.
+Monitor $\lVert R(t)-2\rVert_\infty$ and stop when it reaches the requested
+tolerance; also monitor $\oint \ee^{2u}\bar\epsilon = 4\pi$ (preserved by
+\eqref{eq:flowscalar} up to time-discretization error; renormalize $u$ by a
+constant if it drifts).
+
+\paragraph{Newton polish (recommended).}
+The fixed point of \eqref{eq:flowscalar} satisfies the Liouville-type
+elliptic equation
+\begin{equation}
+  \mathcal{N}[u] \equiv \bar\Delta u - \tfrac12\bar R + \ee^{2u} = 0 ,
+  \label{eq:liouville}
+\end{equation}
+with Fr\'echet derivative
+$\mathcal{N}'[u]\,\delta u = \bar\Delta\,\delta u + 2\ee^{2u}\delta u$.
+Note that this nonlinearity is essential: no substitution $v = F^s$ of the
+conformal factor $F = \ee^{2u}$ linearizes \eqref{eq:liouville}.  E.g.\
+$v = 1/F$ gives $\bar\Delta v + \bar R\,v - |\bar\nabla v|^2/v = 2$, which
+misses linearity only by the gradient term, but the term never cancels for
+any power (in contrast to the Yamabe problem in $n\ge3$ dimensions, where
+$\tilde q = \psi^{4/(n-2)}q$ removes it identically); see
+the puncture method below for a genuinely linear alternative.
+
+One subtlety: $\mathcal{N}'$ is \emph{not} sign definite, and at the
+solution it is singular.  Indeed
+$\mathcal{N}'[u_\infty] = \ee^{2u_\infty}(\Lapo + 2)$, whose kernel is
+exactly the $\ell=1$ eigenspace $\mathrm{span}\{\chi_i\}$ of
+Section~\ref{sec:eigen}.  This must be so: the solutions of
+\eqref{eq:liouville} form a three-parameter family (the M\"obius orbit of
+round representatives, all equally acceptable), and the kernel directions
+are its tangent, $\delta u = \chi_i$, matching the conformal Killing flow
+$\Lie_{\xi_i}\qo = 2\chi_i\,\qo$.  Constants are a positive direction
+($(\Lapo+2)\,c = 2c$) and $\ell\ge2$ modes are negative.  In practice:
+use MINRES (not CG) for the Newton steps and take minimal-norm steps, or
+deflate/project out the three near-kernel modes; drift along the kernel is
+pure gauge and harmless.  Convergence is then quadratic transverse to the
+gauge orbit.  The most efficient strategy is: integrate
+\eqref{eq:flowscalar} until $\lVert R-2\rVert_\infty \lesssim 10^{-2}$ (the
+flow is unconditionally globally convergent and needs no good initial guess),
+then polish with Newton to round-off.  Pure Ricci flow alone is also fine,
+merely slower.
+
+\paragraph{A fully linear alternative: flattening through a puncture.}
+Although \eqref{eq:liouville} cannot be linearized by a change of variables,
+genus-zero uniformization \emph{can} be reduced to linear solves by changing
+the route: flatten first, then map to the sphere by inverse stereographic
+projection \cite{haker2000}.  Pick an arbitrary puncture point
+$p\in\Delta$ and solve the \emph{linear} Poisson equation
+\begin{equation}
+  \bar\Delta\, w = \tfrac12\bar R - 4\pi\,\delta_p
+  \label{eq:puncture}
+\end{equation}
+(solvable on the closed surface because both terms integrate to $4\pi$ by
+Gauss--Bonnet; near $p$, $w \simeq -2\ln r$).  Then $\ee^{2w}\bar q$ is flat
+on $\Delta\setminus\{p\}$ and complete --- it is the Euclidean plane, with
+$p$ at infinity.  Its Cartesian coordinates $(x,y)$ are a conjugate pair of
+$\bar q$-harmonic functions on $\Delta\setminus\{p\}$ with a simple pole at
+$p$ (harmonicity of functions is conformally invariant in two dimensions),
+obtained from a second linear solve.  Inverse stereographic projection of
+$z = x+iy$ then gives the round representative and the eigenfunction triple
+in closed form,
+\begin{equation}
+  \chi_1 + i\chi_2 = \frac{2z}{1+|z|^2},
+  \qquad
+  \chi_3 = \frac{|z|^2-1}{|z|^2+1},
+  \qquad
+  \qo = \frac{4\,\dd z\,\dd\bar z}{(1+|z|^2)^2},
+\end{equation}
+so this route replaces \emph{both} the flow of
+Section~\ref{sec:ricciflow} \emph{and} the eigenproblem of
+Section~\ref{sec:eigen}.  The arbitrary choices (the puncture $p$, the
+normalization of the conjugate pair) move the resulting CSCS by exactly a
+M\"obius transformation, which the invariants of
+Section~\ref{sec:invariants} are designed to absorb.  The price is the
+singular sources: to retain spectral accuracy the logarithm and the pole
+must be split off analytically (solve for the smooth remainders), which on
+a curved background $\bar q$ requires local expansions around $p$.  Since
+the Newton polish above costs only a handful of smooth linear solves anyway,
+we keep flow$+$Newton as the mainline and recommend the puncture method as
+an independent cross-check of the uniformization stage.
+
+\subsection{The first eigenfunctions of the round Laplacian}
+\label{sec:eigen}
+
+On the unit round sphere the lowest nonzero eigenvalue of the
+Laplace--Beltrami operator is $-2$, with the three-dimensional eigenspace
+spanned by the $\ell=1$ harmonics.  We therefore solve
+\begin{equation}
+  \Lapo \chi = -2\,\chi
+  \qquad\Longleftrightarrow\qquad
+  \bar\Delta \chi = -2\,\ee^{2u_\infty}\chi
+  \label{eq:eigenproblem}
+\end{equation}
+(using $\Lapo = \ee^{-2u_\infty}\bar\Delta$) for the three eigenfunctions
+$\chi_i$, $i=1,2,3$ --- these are the functions called $x,y,z$ in
+\texttt{GOAL.md}.  The right form for numerics is the \emph{generalized
+symmetric eigenproblem} on the right of \eqref{eq:eigenproblem}: $\bar\Delta$
+is self-adjoint with respect to the measure $\bar\epsilon$, and the weight
+$\ee^{2u_\infty}$ is positive, so the eigenvalues are real and eigenfunctions
+belonging to different eigenvalues are orthogonal in
+\begin{equation}
+  \langle a,b\rangle_{\mathring{}}
+  = \oint a\,b\;\ee^{2u_\infty}\bar\epsilon
+  = \oint a\,b\;\epso .
+\end{equation}
+In exact arithmetic the eigenvalue $-2$ is exactly triply degenerate;
+numerically one finds a tight cluster of three eigenvalues near $-2$
+separated by a gap from $0$ above and from $\approx-6$ ($\ell=2$) below, so a
+shift-invert Krylov method targeted at $-2$ is robust
+(Section~\ref{sec:numerics}).
+
+The cluster fixes only the 3-space $\mathrm{span}\{\chi_i\}$; normalize and
+orient as follows:
+\begin{enumerate}
+\item \textbf{Orthonormalization.}  Compute the Gram matrix
+  $G_{ij} = \frac{3}{4\pi}\oint \chi_i\chi_j\,\epso$ and replace
+  $\chi_i \leftarrow (G^{-1/2})_{ij}\,\chi_j$ (symmetric/L\"owdin
+  orthonormalization), so that
+  \begin{equation}
+    \oint \chi_i \chi_j\;\epso = \frac{4\pi}{3}\,\delta_{ij},
+    \qquad
+    \oint \chi_i\;\epso = 0
+    \label{eq:chinorm}
+  \end{equation}
+  (the zero mean is automatic: $\chi_i \perp \text{constants}$).
+\item \textbf{Handedness.}  Compute
+  \begin{equation}
+    \mathcal{O} = \oint \chi_1\,
+      \epso^{AB}\,\partial_A\chi_2\,\partial_B\chi_3\;\epso ;
+    \label{eq:handedness}
+  \end{equation}
+  if $\mathcal{O}<0$, swap $\chi_1\leftrightarrow\chi_2$ (or flip the sign
+  of one $\chi_i$).
+\end{enumerate}
+By the classical rigidity of the first eigenfunctions (Takahashi
+\cite{takahashi1966}; the map $p\mapsto\vec\chi(p)$ is an isometric embedding
+of $(\Delta,\qo)$ onto the unit sphere in $\mathbb{R}^3$), the normalized
+triple satisfies \emph{pointwise}
+\begin{equation}
+  \delta^{ij}\chi_i\chi_j = 1,
+  \qquad
+  \delta^{ij}\,\partial_A\chi_i\,\partial_B\chi_j = \qo_{AB},
+  \label{eq:takahashi}
+\end{equation}
+and, with the correct handedness,
+\begin{equation}
+  \chi_1\,\dd\chi_2\wedge\dd\chi_3
+  + \chi_2\,\dd\chi_3\wedge\dd\chi_1
+  + \chi_3\,\dd\chi_1\wedge\dd\chi_2 = \epso,
+  \qquad\text{i.e.}\qquad
+  \tfrac12\,\epsilon^{ijk}\chi_i\,
+  \epso^{AB}\partial_A\chi_j\,\partial_B\chi_k = 1 .
+  \label{eq:orientation}
+\end{equation}
+Equation \eqref{eq:orientation} integrated over the sphere shows that the
+handedness integral \eqref{eq:handedness} evaluates to
+$\mathcal{O} = +\frac{4\pi}{3}$ for a right-handed triple (and
+$-\frac{4\pi}{3}$ otherwise), so the test is unambiguous.  The residuals of \eqref{eq:eigenproblem},
+\eqref{eq:takahashi} and \eqref{eq:orientation} are sharp diagnostics of the
+overall accuracy of the uniformization and eigenvalue steps.
+
+The remaining freedom in $\{\chi_i\}$ is exactly one global rotation
+$\chi_i \to \Lambda_i{}^j \chi_j$, $\Lambda\in SO(3)$.  No ``north pole'' or
+``zero meridian'' need be selected: under this freedom $\vJ$ and $\vK$ rotate
+covariantly, the invariants \eqref{eq:AB}, the spin \eqref{eq:Jinvariant} and
+the axial field \eqref{eq:axialvector} are unchanged.
+
+\subsection{The M\"obius generators in the original chart}
+\label{sec:generators}
+
+This is the step where the present algorithm departs from (and simplifies)
+the skeleton in \texttt{GOAL.md}: the generators
+\eqref{eq:phigen}--\eqref{eq:xigen} can be written covariantly in terms of
+$\qo$ and $\chi_i$ and therefore evaluated \emph{directly in the original
+coordinates}, without ever constructing the good coordinates
+$(\theta_1,\varphi_1)$ and without ``undoing'' the Ricci flow.
+
+\begin{lemma}\label{lem:generators}
+Let $\qo$ be a unit-round metric on $S^2$ and $\chi_i$ a normalized,
+right-handed triple of first eigenfunctions as in
+Section~\ref{sec:eigen}.  Then the rotation and proper conformal generators
+of the M\"obius group of $\qo$ are
+\begin{equation}
+  \boxed{\;
+  \phi_i{}^A = \epso^{AB}\,\partial_B \chi_i,
+  \qquad
+  \xi_i{}^A = -\,\qo^{AB}\,\partial_B \chi_i .
+  \;}
+  \label{eq:generatorscov}
+\end{equation}
+Moreover $\phi_i{}^A = \epsilon_{ijk}\,\chi_j\,\qo^{AB}\partial_B\chi_k$.
+\end{lemma}
+
+\begin{proof}
+Both sides of each identity are tensorial, so it suffices to verify them in
+coordinates $(\theta,\varphi)$ adapted to $\qo$, which exist by
+\eqref{eq:takahashi}: $\qo = \dd\theta^2+\sin^2\!\theta\,\dd\varphi^2$ and
+\begin{equation}
+  \chi_1 = \sin\theta\cos\varphi,\qquad
+  \chi_2 = \sin\theta\sin\varphi,\qquad
+  \chi_3 = \cos\theta .
+  \label{eq:chistandard}
+\end{equation}
+With $\epso_{\theta\varphi} = \sin\theta$, i.e.\
+$\epso^{\theta\varphi} = 1/\sin\theta$:
+\begin{align*}
+  \epso^{AB}\partial_B\chi_3 &:\quad
+  \epso^{\theta\varphi}\partial_\varphi\cos\theta = 0,\qquad
+  \epso^{\varphi\theta}\partial_\theta\cos\theta
+  = \Bigl(-\frac{1}{\sin\theta}\Bigr)(-\sin\theta) = 1
+  \quad\Longrightarrow\quad \partial_\varphi = \phi_3 . \\
+  \epso^{AB}\partial_B\chi_1 &:\quad
+  \epso^{\theta\varphi}\partial_\varphi(\sin\theta\cos\varphi)
+  = -\sin\varphi,\qquad
+  \epso^{\varphi\theta}\partial_\theta(\sin\theta\cos\varphi)
+  = -\cot\theta\cos\varphi
+  \quad\Longrightarrow\quad \phi_1 ,
+\end{align*}
+and analogously for $\phi_2$, reproducing \eqref{eq:phigen}.  For the second
+family, $-\qo^{AB}\partial_B\chi_3$ has components
+$(-\partial_\theta\cos\theta,\,0) = (\sin\theta,\,0)$, i.e.\
+$\sin\theta\,\partial_\theta = \xi_3$, and
+$-\qo^{AB}\partial_B\chi_1 = -\cos\theta\cos\varphi\,\partial_\theta +
+\frac{\sin\varphi}{\sin\theta}\,\partial_\varphi = \xi_1$, etc., reproducing
+\eqref{eq:xigen}.  The alternative formula for $\phi_i$ follows from
+$\epsilon_{ijk}\chi_j\partial_A\chi_k = \epso_{AB}\,\qo^{BC}\partial_C\chi_i$,
+which is readily checked on \eqref{eq:chistandard} (both sides are the
+rotation covector field about the $i$-axis).
+\end{proof}
+
+Concretely, at every collocation point:
+\begin{equation}
+  \qo_{AB} = \ee^{2u_\infty}\,\frac{4\pi}{\mathcal{A}}\,q_{AB},
+  \qquad
+  \epso^{AB}
+  = \frac{\pm 1}{\sqrt{\det\qo}}
+  \quad (\epso^{\theta\varphi} = +1/\sqrt{\det\qo}),
+  \qquad
+  \phi_i{}^A,\ \xi_i{}^A \text{ from \eqref{eq:generatorscov}}.
+  \label{eq:generatorseval}
+\end{equation}
+The fields \eqref{eq:generatorscov} are normalization-correct ($2\pi$-periodic
+orbits for $n_i\phi_i$) precisely because $\qo$ has area $4\pi$ and the
+$\chi_i$ obey \eqref{eq:chinorm}--\eqref{eq:takahashi}; this is why the area
+normalization of Section~\ref{sec:ricciflow} matters.
+
+\subsection{Invariants, boost, spin, axis, and axial vector field}
+\label{sec:invariants}
+
+With $\omega^{\mathrm{inv}}$ from Section~\ref{sec:hodge}, the generators
+from Section~\ref{sec:generators}, and the \emph{physical} area form
+$\epsilon$ of $q$:
+\begin{equation}
+  J_i = -\frac{1}{8\pi G}\oint_\Delta
+        \omega^{\mathrm{inv}}_A\,\phi_i{}^A\;\epsilon,
+  \qquad
+  K_i = -\frac{1}{8\pi G}\oint_\Delta
+        \omega^{\mathrm{inv}}_A\,\xi_i{}^A\;\epsilon .
+  \label{eq:JKeval}
+\end{equation}
+Then:
+\begin{enumerate}
+\item \textbf{Spin.}  Compute $A$ and $B$ from \eqref{eq:AB} and
+  \begin{equation}
+    J = \sqrt{\frac{A+\sqrt{A^2+4B^2}}{2}} .
+  \end{equation}
+  This requires no frame change and is the primary output.  If
+  $A^2+B^2 = 0$ (to within tolerance), report $J=0$ and stop: no axis or
+  axial field exists.
+\item \textbf{Boost to the parallel frame.}  If
+  $|\vJ\times\vK| > \texttt{tol}$, compute $S$, $\beta$, and $\vn =
+  (\vJ\times\vK)/|\vJ\times\vK|$ from \eqref{eq:betacondition}, set
+  $\lambda = \artanh\beta$, and obtain $\vJ'$ (and $\vK'$, as a check:
+  $\vJ'\times\vK' \approx 0$) from \eqref{eq:boost} and the transformed
+  rotation generators $\tilde\phi_i$ from \eqref{eq:finitegen}, all evaluated
+  pointwise in the original chart.  If $\vJ\times\vK \approx 0$ already, set
+  $\tilde\phi_i = \phi_i$, $\vJ' = \vJ$.  (Consistency: $|\vJ'|$ must equal
+  \eqref{eq:Jinvariant} up to round-off, since in the parallel frame
+  $A = J'^2 - K'^2$, $B = \pm J'K'$ and \eqref{eq:Jinvariant} returns
+  $J'$.)
+\item \textbf{Axis and axial vector field.}  The spin axis (unit vector in
+  the $\mathbb{R}^3$ of the $\chi'_i$, i.e.\ relative to the boosted CSCS
+  frame, defined up to the global $SO(3)$ freedom) is
+  $\hat a_i = J'_i/|\vJ'|$ (or $K'_i/|\vK'|$ if $\vJ'=0$), and the axial
+  vector field on $\Delta$ is
+  \begin{equation}
+    \phi^A = \hat a_i\;\tilde\phi_i{}^A ,
+  \end{equation}
+  an explicit vector field at the collocation points of the \emph{original}
+  chart.  Its two zeros are the rotation poles.  For reporting the axis as a
+  spatial direction, the poles can be located on the surface and the
+  corresponding embedding points $x^i$ (or the vector between them) quoted;
+  for small $|\vK|$ the axis is simply $\vJ/|\vJ|$ in the $\chi$-frame.
+\end{enumerate}
+
+\subsection{Optional: explicit good coordinates}
+\label{sec:goodcoords}
+
+The algorithm never needs them, but conformally spherical coordinates can be
+read off from the eigenfunctions if desired (e.g.\ for visualization or for
+comparing with \eqref{eq:cscs}):
+\begin{equation}
+  \theta_1 = \arccos \chi_3,
+  \qquad
+  \varphi_1 = \atantwo(\chi_2,\,\chi_1).
+  \label{eq:goodcoords}
+\end{equation}
+In these coordinates $q = F\,(\dd\theta_1^2 +
+\sin^2\!\theta_1\,\dd\varphi_1^2)$ with
+$F = (\mathcal{A}/4\pi)\,\ee^{-2u_\infty}$ expressed as a function of
+$(\theta_1,\varphi_1)$.  Verifying this (by interpolating $F$ and $q$ onto a
+grid in $(\theta_1,\varphi_1)$ and checking the off-diagonal and trace parts)
+is a strong end-to-end test, but as a computational route it is inferior:
+the map \eqref{eq:goodcoords} clusters and dilutes collocation points, and
+re-interpolation costs accuracy for no benefit.
+
+%==============================================================================
+\section{Numerical implementation}
+\label{sec:numerics}
+
+\subsection{Spin-weighted spherical harmonic representation}
+
+All fields live on a spectral grid on the coordinate sphere (equiangular or
+Gauss--Legendre in $\theta$, equispaced in $\varphi$), with band limit
+$\ell_{\max}$, as provided by the packages \texttt{FastSphericalHarmonics}
+and \texttt{Abstract\-Spherical\-Harmonics}.  Tensor components in the
+$(\theta,\varphi)$ chart are singular at the poles; the cure is the
+$\eth$-formalism \cite{gomez1997}: fix the unit-sphere dyad
+\begin{equation}
+  m^A = \tfrac{1}{\sqrt2}\,\bigl(1,\; \tfrac{i}{\sin\theta}\bigr),
+  \qquad
+  \hat q_{AB}\,m^A\bar m^B = 1,\quad m^Am_A = 0,
+\end{equation}
+and store any tensor through its spin-weighted scalar components, e.g.\ for
+the metric
+\begin{equation}
+  q_0 = q_{AB}\,m^A\bar m^B \;(\text{spin } 0,\ \text{real}),
+  \qquad
+  q_2 = q_{AB}\,m^A m^B \;(\text{spin } 2),
+\end{equation}
+and for one-forms $\omega_1 = \omega_A m^A$ (spin 1).  These are globally
+smooth functions expandable in spin-weighted harmonics ${}_sY_{\ell m}$.
+Covariant derivatives $\hat\nabla_A$ with respect to the \emph{unit
+coordinate sphere} act as $\eth$/$\bareth$ on spin components and are
+diagonal in the ${}_sY_{\ell m}$ basis; derivatives with respect to $q$ (or
+$\bar q$, $\qo$) are then assembled algebraically with the tensor
+$C^A_{BC}$ of \eqref{eq:Cdiff}, exactly as in
+\eqref{eq:Reth}--\eqref{eq:lapeth}.  (The pre-1.0 prototype of this
+package implemented \eqref{eq:Reth} this way.)
+
+Scalars such as $h$, $u$, $g$, $\chi_i$, $R$, and the integrands of
+\eqref{eq:JKeval} are ordinary spin-0 fields.  Surface integrals are
+evaluated by quadrature as
+$\oint f\,\epsilon = \int f\,\frac{\sqrt{\det q}}{\sin\theta}\,
+\sin\theta\,\dd\theta\,\dd\varphi$, where the ratio
+$\sqrt{\det q}/\sin\theta$ is a smooth strictly positive scalar; with a
+spectral transform this is just $\sqrt{4\pi}$ times the $\ell=0$ coefficient
+of $f\sqrt{\det q}/\sin\theta$.
+
+\paragraph{Dealiasing.}  The pipeline is full of pointwise products and of
+the nonlinearity $\ee^{2u}$; use a grid with $\gtrsim 2\ell_{\max}$ points
+per dimension (3/2-rule at minimum) and verify spectral tails.  All
+quantities derived from $h$ and the metric are smooth, so coefficients decay
+exponentially; the resolution requirement is set by the distortion of the
+horizon (the dynamic range of $F$).
+
+\subsection{Elliptic solves and the eigenproblem}
+
+The operators $\Delta_q$ (for \eqref{eq:hodgesolve}), the Newton operator
+$\bar\Delta + 2\ee^{2u}$ (for \eqref{eq:liouville}), and $\bar\Delta + 2
+\ee^{2u_\infty}$ (shift-invert in \eqref{eq:eigenproblem}) are all of the
+form ``unit-sphere Laplacian plus smooth corrections''.  Apply them
+matrix-free on spherical-harmonic coefficients (transform $\to$ pointwise
+algebra $\to$ transform) and solve with preconditioned CG/MINRES, using the
+diagonal unit-sphere Laplacian $-\ell(\ell+1)$ (shifted) as preconditioner.
+For moderate resolution ($\ell_{\max}\lesssim 50$, i.e.\
+$(\ell_{\max}+1)^2 \lesssim 2600$ modes) dense assembly and direct
+factorization/eigensolution is perfectly affordable and simplest.
+
+For \eqref{eq:eigenproblem}, request the three eigenpairs nearest $-2$ of
+the pencil $(\bar\Delta,\ \ee^{2u_\infty}\!\cdot)$, e.g.\ with shift-invert
+Lanczos/Arnoldi (\texttt{Arpack.jl}, as in the pre-1.0 prototype) in the
+inner product $\langle\cdot,\cdot\rangle_{\mathring{}}$, or equivalently the
+eigenpairs of the symmetrized operator
+$\ee^{-u_\infty}\bar\Delta\,\ee^{-u_\infty}$.  The constant function
+(eigenvalue $0$) and the $\ell=2$-like cluster (near $-6$) are well
+separated, so convergence is fast and unambiguous.
+
+\subsection{Diagnostics}
+
+Cheap, sharp internal checks, in pipeline order:
+\begin{enumerate}
+\item spectral tail of $h$, $q_0$, $q_2$ (input resolution);
+\item Gauss--Bonnet: $\oint R[q]\,\epsilon = 8\pi$;
+\item Ricci flow / Newton: $\lVert R[\qo]-2\rVert_\infty$, area drift;
+\item eigencluster: $|\mu_i + 2|$ for the three eigenvalues, residuals
+  $\lVert\bar\Delta\chi_i + 2\ee^{2u_\infty}\chi_i\rVert$;
+\item rigidity: $\lVert \delta^{ij}\chi_i\chi_j - 1\rVert_\infty$ and
+  $\lVert \delta^{ij}\partial_A\chi_i\partial_B\chi_j -
+  \qo_{AB}\rVert_\infty$ \ \eqref{eq:takahashi};
+\item Killing check: $\lVert \Lie_{\phi_i}\qo \rVert$, conformal check:
+  $\Lie_{\xi_i}\qo = 2\chi_i\,\qo$ (from
+  $\Do_A\Do_B\chi_i = -\chi_i\,\qo_{AB}$);
+\item Hodge: $\oint D^A\omega^{\mathrm{inv}}_A\,$-residual; same $g$ from
+  $q$- and $\qo$-divergences;
+\item invariance: $|\vJ'|$ from the boosted frame vs.\
+  \eqref{eq:Jinvariant}; $\vJ'\times\vK'\approx 0$;
+\item convergence of $J$, $\vJ$, $\vK$ under $\ell_{\max}$ doubling
+  (should be exponential).
+\end{enumerate}
+
+%==============================================================================
+\section{Algorithm summary}
+\label{sec:summary}
+
+\begin{enumerate}
+\item \textbf{Geometry.}  From $h$ and $\gamma_{ij}$: tangents $e_A{}^i$,
+  metric $q_{AB}$, area form $\epsilon$, area $\mathcal{A}$, outward normal
+  $s^i$ \ \eqref{eq:inducedmetric}--\eqref{eq:unitnormal}.
+\item \textbf{Rotation form.}  $\omega_A = -K_{ij}e_A{}^i s^j$
+  \ \eqref{eq:omegaADM}.
+\item \textbf{Gauge fix.}  Solve $\Delta_q g = D^A\omega_A$; set
+  $\omega^{\mathrm{inv}} = \omega - \dd g$ \ \eqref{eq:hodgesolve}.
+\item \textbf{Normalize.}  $\bar q = (4\pi/\mathcal{A})\,q$; compute
+  $\bar R$ \ \eqref{eq:Reth}.
+\item \textbf{Uniformize.}  Ricci flow \eqref{eq:flowscalar} (optionally
+  Newton polish \eqref{eq:liouville}) $\to u_\infty$,
+  $\qo = \ee^{2u_\infty}\bar q$ with $R[\qo]=2$.
+\item \textbf{Eigenfunctions.}  Solve
+  $\bar\Delta\chi = -2\ee^{2u_\infty}\chi$ for the triple near $-2$;
+  orthonormalize \eqref{eq:chinorm}; fix handedness \eqref{eq:orientation}.
+\item \textbf{Generators.}  $\phi_i{}^A = \epso^{AB}\partial_B\chi_i$,
+  $\xi_i{}^A = -\qo^{AB}\partial_B\chi_i$ \ \eqref{eq:generatorscov}.
+\item \textbf{Invariants.}  $J_i$, $K_i$ by quadrature \eqref{eq:JKeval}
+  with the \emph{physical} $\epsilon$; then $A$, $B$ \eqref{eq:AB} and
+  $J$ \eqref{eq:Jinvariant}.
+\item \textbf{Axis and axial field.}  If $A^2+B^2>0$: boost
+  \eqref{eq:betacondition}, \eqref{eq:boost}, \eqref{eq:finitegen}; output
+  $J$, axis $\hat a_i = J'_i/|\vJ'|$, and
+  $\phi^A = \hat a_i\tilde\phi_i{}^A$ \ \eqref{eq:axialvector}.
+\end{enumerate}
+
+%==============================================================================
+\section{Tests}
+\label{sec:tests}
+
+\begin{enumerate}
+\item \textbf{Round sphere in flat space / Schwarzschild.}  $\omega = 0$
+  identically; every stage should return its trivial value ($u_\infty$
+  constant $=0$, $\chi_i$ the $\ell=1$ harmonics, $\vJ=\vK=0$, $J = 0$) to
+  round-off.
+\item \textbf{Coordinate-distorted Schwarzschild.}  Apply a smooth
+  angle-dependent radial coordinate distortion (so that $h$ is nontrivial
+  but the geometry is unchanged): again $J=0$, and $\qo$, $\chi_i$ must
+  reproduce the distortion map.  This tests uniformization + eigenfunctions
+  in isolation from $\omega$.
+\item \textbf{Kerr, standard slicing.}  For a Kerr--Schild (or
+  Boyer--Lindquist) slice of Kerr with parameters $(M,a)$, the horizon
+  $r=r_+$ gives $\vK=0$ (after gauge fixing), $\vJ$ along the spin axis,
+  and $J = Ma$ to spectral accuracy; the axial field $\phi$ must agree with
+  the axial Killing vector.  The \texttt{SpacetimeMetrics} package provides
+  the analytic data (\texttt{KerrSchild} with \texttt{adm\_decompose} and
+  \texttt{ExtrinsicCurvature}).  Verify $J_3=+Ma$ (not $-Ma$)
+  to pin down orientation conventions.
+\item \textbf{Rotated/translated Kerr.}  Rotate the spin axis and offset the
+  centre $c^i$: $J$ invariant, $\vJ$ rotates as a vector, the recovered axis
+  follows.
+\item \textbf{Tilted slicing of Kerr.}  Change the slicing through the
+  horizon (tilted/waved leaves).  Without the Hodge projection the raw
+  $\vJ$ shifts; with it, $J=Ma$ is recovered --- this is the paper's own
+  acid test for the gauge fixing \cite{korzynski2007}.
+\item \textbf{Distorted non-axisymmetric data.}  E.g.\ Bowen--York or
+  superposed-Kerr initial data: check exponential convergence of $J$ with
+  $\ell_{\max}$, the internal diagnostics of
+  Section~\ref{sec:numerics}, and stability of the axis under resolution
+  changes.
+\end{enumerate}
+
+%==============================================================================
+\appendix
+\section{Corrections and clarifications to the \texttt{GOAL.md} skeleton}
+\label{app:corrections}
+
+\begin{enumerate}
+\item \textbf{``Use Ricci flow to find a conformally round metric.''}
+  In two dimensions the (normalized) Ricci flow moves only the conformal
+  factor, so it does not \emph{find} a conformally round metric --- $q$ is
+  already conformally round by uniformization.  What the flow finds is the
+  \emph{round representative} $\qo = \ee^{2u_\infty}\bar q$ of the conformal
+  class, in the original chart.  Operationally this is what the skeleton
+  intended, but it reduces the PDE problem from a tensor flow to the single
+  scalar equation \eqref{eq:flowscalar}.
+\item \textbf{``Undo the Ricci flow to find $q(\theta_1,\varphi_1)$.''}
+  Unnecessary, and best avoided.  The physical metric is known all along in
+  the original chart; the invariants need only $\omega^{\mathrm{inv}}$,
+  $\epsilon$, and the generators $\phi_i,\xi_i$, and
+  Lemma~\ref{lem:generators} provides the generators directly in the
+  original chart.  No quantity is ever transformed to
+  $(\theta_1,\varphi_1)$, and no re-interpolation occurs.  The explicit
+  coordinates \eqref{eq:goodcoords} survive only as an optional diagnostic.
+\item \textbf{Determination of $x,y,z$ (here $\chi_{1,2,3}$).}  The
+  skeleton's conditions (range $[-1,1]$, zero mean, orthogonality,
+  normalization) do not determine the functions and cannot be ``solved as a
+  linear system'': infinitely many triples satisfy them.  The missing
+  condition is that they span the \emph{lowest nonzero eigenspace of}
+  $\Lapo$ (eigenvalue $-2$), eq.~\eqref{eq:eigenproblem} --- so the correct
+  guess in the skeleton is ``eigenvalue problem''.  Zero mean is then
+  automatic; orthogonality and normalization fix the Gram matrix
+  \eqref{eq:chinorm}; the range $[-1,1]$ and indeed
+  $\sum_i\chi_i^2 = 1$ follow by rigidity \eqref{eq:takahashi} rather than
+  being imposable conditions.
+\item \textbf{Integration measure.}  The orthogonality/normalization
+  integrals must use the \emph{round} area form $\epso$ (equivalently weight
+  $\ee^{2u_\infty}$ in $\bar q$-integrals), with
+  $\oint\chi_i\chi_j\,\epso = \frac{4\pi}{3}\delta_{ij}$, not the coordinate
+  or physical measure.
+\item \textbf{Area normalization.}  The metric must be scaled to area $4\pi$
+  before the flow/eigenproblem; otherwise the target curvature is not $2$,
+  the eigenvalue is not $-2$, and the generators
+  \eqref{eq:generatorscov} acquire wrong normalizations (orbits would not
+  have period $2\pi$).  The physical area form still appears in the final
+  integrals \eqref{eq:JKeval}.
+\item \textbf{North pole and zero meridian.}  No such choice is needed: the
+  residual freedom is a global $SO(3)$ under which all outputs are
+  covariant.  What \emph{is} needed instead is a handedness fix
+  \eqref{eq:orientation}, which the skeleton omits; with the wrong
+  orientation, $\vJ \to -\vJ$.
+\item \textbf{Gauge fixing of $\omega$.}  The skeleton omits the Hodge
+  projection \eqref{eq:omegainv} entirely.  It is essential: without it the
+  $J_i$ depend on the choice of null normals / slicing through the horizon
+  (Section~\ref{sec:hodge}), and e.g.\ a tilted slice of Kerr gives a wrong
+  spin.
+\item \textbf{$K_i$ and the boost.}  The skeleton computes only the
+  $J_i$-side implicitly.  The $K_i$ are needed both for the invariant value
+  of the spin \eqref{eq:Jinvariant} and for the axial vector field, which is
+  defined in the boosted frame where $\vJ\parallel\vK$
+  \eqref{eq:betacondition}; only for $\vK\times\vJ = 0$ (e.g.\ exact
+  axisymmetry) can the boost be skipped.
+\item \textbf{Inputs.}  Derivatives of $\gamma_{ij}$ and $K_{ij}$ are not
+  required (Section~\ref{sec:inputs}); listing them among the inputs is
+  harmless but unnecessary.
+\end{enumerate}
+
+\section{Two-dimensional identities used}
+\label{app:identities}
+
+For $\tilde q = \ee^{2u}q$ on a two-manifold:
+$\tilde q^{AB} = \ee^{-2u}q^{AB}$;
+$\tilde\epsilon_{AB} = \ee^{2u}\epsilon_{AB}$,
+$\tilde\epsilon^{AB} = \ee^{-2u}\epsilon^{AB}$;
+$\tilde\epsilon_A{}^B = \epsilon_A{}^B$ (conformal invariance of the Hodge
+star on one-forms);
+$\Delta_{\tilde q}f = \ee^{-2u}\Delta_q f$;
+$R[\tilde q] = \ee^{-2u}(R[q] - 2\Delta_q u)$.
+Levi-Civita identities: $\epsilon_A{}^C\epsilon_C{}^B = -\delta_A^B$,
+$\epsilon^{AC}\epsilon_{BC} = \delta^A_B$,
+$\epsilon^{AB}D_AD_Bf = 0$.
+Hodge: $\star\star = -1$ on one-forms;
+for $\omega = \star\dd f + \dd g$:\ \
+$D^A\omega_A = \Delta g$, \ \
+$\epsilon^{AB}D_A\omega_B = -\Delta f$.
+Gauss--Bonnet: $\oint R\,\epsilon = 8\pi$ on $S^2$.
+First-eigenfunction (Obata-type) identity on the unit round sphere:
+$\Do_A\Do_B\chi_i = -\chi_i\,\qo_{AB}$, whence $\Lapo\chi_i = -2\chi_i$ and,
+for $\xi_i{}^A = -\qo^{AB}\partial_B\chi_i$,
+\begin{equation*}
+  \Lie_{\xi_i}\qo_{AB} = -2\,\Do_A\Do_B\chi_i = 2\chi_i\,\qo_{AB},
+  \qquad
+  \Do_A\,\xi_i{}^A = 2\chi_i ,
+\end{equation*}
+the conformal Killing equation with divergence $2\chi_i$.
+
+\begin{thebibliography}{9}
+
+\bibitem{korzynski2007}
+M.~Korzy\'nski,
+\emph{Quasi-local angular momentum of non-symmetric isolated and dynamical
+horizons from the conformal decomposition of the metric},
+Class.\ Quantum Grav.\ \textbf{24}, 5935 (2007);
+\href{https://arxiv.org/abs/0707.2824}{arXiv:0707.2824 [gr-qc]}.
+
+\bibitem{hamilton1988}
+R.~S.~Hamilton,
+\emph{The Ricci flow on surfaces},
+in \emph{Mathematics and General Relativity}, Contemp.\ Math.\ \textbf{71},
+237--262 (AMS, 1988).
+
+\bibitem{chow1991}
+B.~Chow,
+\emph{The Ricci flow on the 2-sphere},
+J.\ Differential Geom.\ \textbf{33}, 325--334 (1991).
+
+\bibitem{gomez1997}
+R.~G\'omez, L.~Lehner, P.~Papadopoulos, J.~Winicour,
+\emph{The eth formalism in numerical relativity},
+Class.\ Quantum Grav.\ \textbf{14}, 977 (1997);
+\href{https://arxiv.org/abs/gr-qc/9702002}{arXiv:gr-qc/9702002}.
+
+\bibitem{dkss2003}
+O.~Dreyer, B.~Krishnan, E.~Schnetter, D.~Shoemaker,
+\emph{Introduction to isolated horizons in numerical relativity},
+Phys.\ Rev.\ D \textbf{67}, 024018 (2003);
+\href{https://arxiv.org/abs/gr-qc/0206008}{arXiv:gr-qc/0206008}.
+
+\bibitem{haker2000}
+S.~Haker, S.~Angenent, A.~Tannenbaum, R.~Kikinis, G.~Sapiro, M.~Halle,
+\emph{Conformal surface parameterization for texture mapping},
+IEEE Trans.\ Vis.\ Comput.\ Graphics \textbf{6}, 181 (2000).
+
+\bibitem{takahashi1966}
+T.~Takahashi,
+\emph{Minimal immersions of Riemannian manifolds},
+J.\ Math.\ Soc.\ Japan \textbf{18}, 380--385 (1966).
+
+\bibitem{cookwhiting2007}
+G.~B.~Cook, B.~F.~Whiting,
+\emph{Approximate Killing vectors on $S^2$},
+Phys.\ Rev.\ D \textbf{76}, 041501(R) (2007);
+\href{https://arxiv.org/abs/0706.0199}{arXiv:0706.0199 [gr-qc]}.
+
+\end{thebibliography}
+
+\end{document}

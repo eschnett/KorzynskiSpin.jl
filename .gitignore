@@ -1,1 +1,9 @@
 Manifest.toml
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+GOAL.md~
