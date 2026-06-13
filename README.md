@@ -48,6 +48,26 @@ harmonics via
 / [FastSphericalHarmonics.jl](https://github.com/eschnett/FastSphericalHarmonics.jl));
 no derivatives of the Cauchy data are required.
 
+## Using ApparentHorizonFinder
+
+[ApparentHorizonFinder.jl](https://github.com/eschnett/ApparentHorizonFinder)
+(v2) finds the horizon shape on the same
+[AbstractSphericalHarmonics](https://github.com/eschnett/AbstractSphericalHarmonics.jl)
+grid objects, so its result feeds in directly — no interpolation:
+
+```julia
+using ApparentHorizonFinder, KorzyńskiSpin
+
+horizon = find_horizon(admvars, guess_origin, EquiangularGrid(15), guess_radius)
+result  = horizon_spin(horizon, metric3, excurv3)
+# or at a different resolution (spectral resampling):
+result  = horizon_spin(horizon, metric3, excurv3; grid=EquiangularGrid(23))
+```
+
+A matrix of surface points at the collocation points (e.g. from
+`horizon_points`) is accepted as well:
+`horizon_spin(points, metric3, excurv3; grid=...)`.
+
 ## Validation
 
 `Pkg.test()` checks, among others (see `test/runtests.jl`):
@@ -63,7 +83,11 @@ no derivatives of the Cauchy data are required.
   including its `rotate`/`translate` transformers): $J = Ma$ to machine
   precision ($\sim 10^{-15}$ at `lmax=20`), $\vec K = 0$, spin axis
   recovered, also under rotations+translations of the data, with spectral
-  convergence in `lmax`.
+  convergence in `lmax`,
+- a rotated, translated, **boosted** Kerr black hole whose shape is found
+  numerically by ApparentHorizonFinder: the boost genuinely changes the
+  slicing, and $J = Ma$ and the area still hold to $\sim 10^{-10}$ — the
+  "tilted foliation" acid test of Korzyński's gauge fixing.
 
 ## Related work
 

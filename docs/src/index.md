@@ -14,6 +14,13 @@ quasi-local spin prescriptions and their implementations is in
 [related\_work.pdf](assets/related_work.pdf) (the LaTeX sources in
 `docs.tex/` are canonical).
 
+## Using ApparentHorizonFinder
+
+`ApparentHorizonFinder.find_horizon` (v2) returns its shape on the same
+`AbstractSphericalHarmonics` grid objects, so the result feeds directly into
+`horizon_spin(horizon, metric3, excurv3)` — optionally with a different
+`grid=` for spectral resampling.
+
 ## API reference
 
 ```@autodocs

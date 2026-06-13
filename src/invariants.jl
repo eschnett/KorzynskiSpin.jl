@@ -140,19 +140,38 @@ struct SpinResult
 end
 
 """
-    horizon_spin(embedding, metric3, excurv3; lmax, kwargs...) -> SpinResult
+    horizon_spin(embedding, metric3, excurv3; lmax=24, grid, kwargs...) -> SpinResult
+    horizon_spin(points::AbstractMatrix{<:SVector{3}}, metric3, excurv3; grid, kwargs...)
+    horizon_spin(horizon::NamedTuple, metric3, excurv3; grid=horizon.grid, kwargs...)
 
 Compute the Korzyński quasi-local spin of the surface
 x(θ,ϕ) = `embedding(θ,ϕ)::SVector{3}` in the Cauchy slice with data
 `metric3(x)::SMatrix{3,3}` (γ_ij) and `excurv3(x)::SMatrix{3,3}` (K_ij,
 convention K_ij = −(1/2)£_n γ_ij).
+
+The second form accepts the surface points at the collocation points of
+`grid` directly (by default `EquiangularGrid(size(points, 1) - 1)`, matching
+the layout of an `EquiangularGrid` point matrix).
+
+The third form accepts the result NamedTuple of
+`ApparentHorizonFinder.find_horizon` (any NamedTuple with fields `origin`,
+`grid`, and spin-0 shape coefficients `hlm` in the canonical layout works);
+passing a different `grid` resamples the shape spectrally via
+`ash_resample`.
 """
 function horizon_spin(
-    embedding,
+    embedding, metric3, excurv3; lmax::Int=24, grid::SphereGrid=EquiangularGrid(lmax), kwargs...
+)
+    return horizon_spin_geom(embedding, metric3, excurv3, grid; kwargs...)
+end
+
+# Kernel: `surface` is anything `surface_geometry` accepts (a callable
+# embedding or a matrix of surface points).
+function horizon_spin_geom(
+    surface,
     metric3,
-    excurv3;
-    lmax::Int=24,
-    grid::SphereGrid=EquiangularGrid(lmax),
+    excurv3,
+    grid::SphereGrid;
     flow_tol::Float64=1.0e-3,
     flow_maxiter::Int=10_000,
     newton_tol::Float64=1.0e-13,
@@ -161,7 +180,7 @@ function horizon_spin(
     diagnostics = Dict{Symbol,Float64}()
 
     # §3.2–3.3: geometry and rotation one-form
-    geom = surface_geometry(embedding, metric3, excurv3, grid)
+    geom = surface_geometry(surface, metric3, excurv3, grid)
     diagnostics[:q_imag] = imag_norm(geom.q)
 
     # Operators of the physical metric; Δ_q matrix is reused throughout
@@ -229,4 +248,28 @@ function horizon_spin(
         grid, geom.area, J, Jvec, Kvec, A, B, β⃗, Jvec′, Kvec′, axis, axis_embedding, axial, geom, unif, eig, gen, ωinv,
         diagnostics,
     )
+end
+
+function horizon_spin(
+    points::AbstractMatrix{<:SVector{3}},
+    metric3,
+    excurv3;
+    grid::SphereGrid=EquiangularGrid(size(points, 1) - 1),
+    kwargs...,
+)
+    geom_points = Matrix{SVector{3,Float64}}(points)
+    return horizon_spin_geom(geom_points, metric3, excurv3, grid; kwargs...)
+end
+
+function horizon_spin(horizon::NamedTuple, metric3, excurv3; grid::SphereGrid=horizon.grid, kwargs...)
+    hlm = grid == horizon.grid ? horizon.hlm : ash_resample(grid, horizon.hlm, horizon.grid, 0)
+    h = real.(ash_evaluate(grid, Vector{ComplexF64}(hlm), 0))
+    points = [
+        begin
+            θ, ϕ = ash_point_coord(grid, ij)
+            r̂ = SVector(sin(θ) * cos(ϕ), sin(θ) * sin(ϕ), cos(θ))
+            SVector{3,Float64}(horizon.origin + h[ij] * r̂)
+        end for ij in CartesianIndices(ash_grid_size(grid))
+    ]
+    return horizon_spin_geom(points, metric3, excurv3, grid; kwargs...)
 end

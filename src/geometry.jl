@@ -34,12 +34,27 @@ function shape_embedding(h; center::SVector{3,Float64}=SVector(0.0, 0.0, 0.0))
     end
 end
 
-function surface_geometry(embedding, metric3, excurv3, grid::SphereGrid)
-    sz = ash_grid_size(grid)
-    coords = grid_coords(grid)
+"""
+    surface_geometry(embedding, metric3, excurv3, grid) -> SurfaceGeometry
+    surface_geometry(x::AbstractMatrix{SVector{3,Float64}}, metric3, excurv3, grid)
 
-    # Embedding points and Cauchy data at the points
+Construct the induced geometry and rotation one-form of the surface.  The
+first form evaluates the callable `embedding(θ, ϕ)::SVector{3}` at the
+collocation points of `grid`; the second form accepts the surface points
+directly (size `ash_grid_size(grid)`), e.g. from
+`ApparentHorizonFinder.horizon_points`.
+"""
+function surface_geometry(embedding, metric3, excurv3, grid::SphereGrid)
+    coords = grid_coords(grid)
     x = [SVector{3,Float64}(embedding(θϕ[1], θϕ[2])) for θϕ in coords]
+    return surface_geometry(x, metric3, excurv3, grid)
+end
+
+function surface_geometry(x::AbstractMatrix{SVector{3,Float64}}, metric3, excurv3, grid::SphereGrid)
+    sz = ash_grid_size(grid)
+    size(x) == sz || throw(DimensionMismatch("surface points have size $(size(x)), expected $(sz) for this grid"))
+
+    # Cauchy data at the points
     γ = [SMatrix{3,3,Float64}(metric3(xi)) for xi in x]
     K = [SMatrix{3,3,Float64}(excurv3(xi)) for xi in x]
 

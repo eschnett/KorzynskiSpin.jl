@@ -1,4 +1,5 @@
 using AbstractSphericalHarmonics
+using ApparentHorizonFinder
 using KorzyńskiSpin
 using LinearAlgebra
 using StaticArrays
@@ -144,6 +145,12 @@ end
         ks = KerrSchild(M, a)
         res = horizon_spin(ks_horizon_embedding(M, a), slice_metric(ks), slice_excurv(ks); lmax=lmax)
         @test res.area ≈ ks_horizon_area(M, a) atol = 1.0e-10
+        # the points-matrix entry agrees with the callable entry
+        grid = EquiangularGrid(lmax)
+        emb = ks_horizon_embedding(M, a)
+        pts = [SVector{3,Float64}(emb(θϕ...)) for θϕ in grid_coords(grid)]
+        res_pts = horizon_spin(pts, slice_metric(ks), slice_excurv(ks))
+        @test res_pts.J == res.J
         @test res.J ≈ M * a atol = 1.0e-12
         @test norm(res.Kvec) < 1.0e-10              # axisymmetric: K⃗ = 0 after gauge fixing
         @test res.axis_embedding ≈ SVector(0.0, 0.0, 1.0) atol = 1.0e-10
@@ -191,6 +198,47 @@ end
         @test errs[2] < errs[1]
         @test errs[3] < 1.0e-2 * errs[1]
         @test errs[3] < 1.0e-8
+    end
+
+    @testset "Boosted, rotated, translated Kerr with ApparentHorizonFinder shape" begin
+        # The acid test of the Hodge gauge fixing (Korzyński 2007): a boost
+        # genuinely changes the slicing (∂_t γ ≠ 0 enters K_ij), yet J and the
+        # area are slice-independent.  The shape is not analytic input but
+        # found numerically by ApparentHorizonFinder on the shared SphereGrid.
+        M, a = 1.0, 0.6
+        r₊ = M + sqrt(M^2 - a^2)
+        n̂ = SVector(1.0, 2.0, 2.0) / 3
+        ψ, θr = atan(n̂[2], n̂[1]), acos(n̂[3])
+        b = SVector(0.3, -0.2, 0.1)
+
+        # boost along the (rotated) spin axis: J, area, and axis all survive
+        m = translate(boost(rotate(KerrSchild(M, a), ψ, θr, 0.0), 0.3 * n̂), SVector(0.0, b...))
+        hor = find_horizon(slice_admvars(m), b + SVector(0.05, 0.0, 0.0), EquiangularGrid(15), 2.5, 0.0, 300; verbosity=0)
+        @test hor.success
+        @test hor.origin ≈ b atol = 1.0e-10              # recentring finds the translation
+        res = horizon_spin(hor, slice_metric(m), slice_excurv(m))
+        # (observed at lmax=15: area err 4e-10, J err 6e-11, axis err 2e-11)
+        @test res.area ≈ 8π * M * r₊ atol = 1.0e-8       # slice-independent area
+        @test res.J ≈ M * a atol = 1.0e-9                # tilted-foliation invariance of J
+        @test res.axis_embedding ≈ n̂ atol = 1.0e-9       # boost ∥ axis preserves the axis
+
+        # spectral resampling to a finer grid (observed: J err 2e-13)
+        res2 = horizon_spin(hor, slice_metric(m), slice_excurv(m); grid=EquiangularGrid(19))
+        @test res2.J ≈ M * a atol = 1.0e-11
+
+        # the points-matrix entry is identical to the NamedTuple entry
+        res3 = horizon_spin(horizon_points(hor), slice_metric(m), slice_excurv(m))
+        @test res3.J == res.J
+
+        # transverse boost: assert only the invariants (the embedding-axis
+        # reporting proxy is coordinate-dependent under aberration)
+        v⊥ = 0.25 * normalize(cross(n̂, SVector(0.0, 0.0, 1.0)))
+        m⊥ = boost(rotate(KerrSchild(M, a), ψ, θr, 0.0), v⊥)
+        hor⊥ = find_horizon(slice_admvars(m⊥), SVector(0.05, 0.0, 0.0), EquiangularGrid(15), 2.5, 0.0, 300; verbosity=0)
+        @test hor⊥.success
+        res⊥ = horizon_spin(hor⊥, slice_metric(m⊥), slice_excurv(m⊥))
+        @test res⊥.area ≈ 8π * M * r₊ atol = 1.0e-8
+        @test res⊥.J ≈ M * a atol = 1.0e-9
     end
 
     @testset "Boost identities" begin
