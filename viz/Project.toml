@@ -1,0 +1,14 @@
+[deps]
+AbstractSphericalHarmonics = "ee470b23-2871-4f3a-b920-8523874a9e46"
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
+"KorzyńskiSpin" = "dddeb715-7fc8-4947-8935-98683755b697"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SpacetimeMetrics = "77e61b41-605e-43a6-b70f-04b7dcd1f572"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
+[sources]
+"KorzyńskiSpin" = {path = ".."}
+AbstractSphericalHarmonics = {path = "../../AbstractSphericalHarmonics.jl"}
