@@ -156,11 +156,54 @@ function symrange(scalar)
 end
 
 """
+    contour_segments(scalar, pts, nrm; levels, offset) -> Vector{Point3f}
+
+Isocontour line segments of a grid scalar mapped onto the 3D surface, by
+marching squares on each (θ, φ) cell (including the φ seam): edge crossings
+are linearly interpolated in parameter space and the same fraction is used to
+interpolate the surface position and normal.  Points are pushed out by
+`offset` along the normal to sit just above the mesh (avoids z-fighting).
+The result is a flat vector of endpoint pairs for `linesegments!`.
+"""
+function contour_segments(scalar::AbstractMatrix, pts, nrm; levels, offset)
+    nθ, nφ = size(scalar)
+    segs = Point3f[]
+    for j in 1:nφ
+        jn = j == nφ ? 1 : j + 1
+        for i in 1:(nθ - 1)
+            vs = (scalar[i, j], scalar[i + 1, j], scalar[i + 1, jn], scalar[i, jn])
+            ps = (pts[i, j], pts[i + 1, j], pts[i + 1, jn], pts[i, jn])
+            qs = (nrm[i, j], nrm[i + 1, j], nrm[i + 1, jn], nrm[i, jn])
+            for L in levels
+                cross = Point3f[]
+                for e in 1:4
+                    a = e
+                    b = e == 4 ? 1 : e + 1
+                    if (vs[a] - L) * (vs[b] - L) < 0
+                        t = (L - vs[a]) / (vs[b] - vs[a])
+                        p = ps[a] + t * (ps[b] - ps[a])
+                        n = normalize(qs[a] + t * (qs[b] - qs[a]))
+                        push!(cross, Point3f((p + offset * n)...))
+                    end
+                end
+                # 2 crossings → one segment; 4 (saddle) → connect in cell order
+                if length(cross) == 2
+                    push!(segs, cross[1], cross[2])
+                elseif length(cross) == 4
+                    push!(segs, cross[1], cross[2], cross[3], cross[4])
+                end
+            end
+        end
+    end
+    return segs
+end
+
+"""
     surface_figure(geom, m, scalar; title, colormap, colorrange, ...) -> (fig, ax)
 
-Render the horizon mesh colored by a vertex scalar.  Optionally overlay a
-Cartesian vector field as arrows (`vectors`), the spin axis (`axis`/`center`),
-and the rotation poles.
+Render the horizon mesh colored by a vertex scalar.  Optionally overlay
+isocontours of the scalar (`contours`), a Cartesian vector field as arrows
+(`vectors`), the spin axis (`axis`/`center`), and the rotation poles.
 """
 function surface_figure(
     geom,
@@ -170,6 +213,10 @@ function surface_figure(
     colormap=:viridis,
     colorrange=extrema(scalar),
     colorlabel="",
+    contours=true,
+    ncontours=11,
+    contourcolor=(:gray15, 0.85),
+    contourwidth=1.2,
     vectors=nothing,
     vstride=3,
     vcolor=:black,
@@ -185,6 +232,12 @@ function surface_figure(
     cols = vertex_colors(m, scalar)
     plt = mesh!(ax, makie_mesh(m); color=cols, colormap, colorrange, shading)
     Colorbar(fig[1, 2], plt; label=colorlabel)
+
+    if contours
+        levels = range(colorrange[1], colorrange[2]; length=ncontours + 2)[2:(end - 1)]
+        segs = contour_segments(scalar, geom.x, geom.s; levels, offset=0.004 * meshradius(m))
+        linesegments!(ax, segs; color=contourcolor, linewidth=contourwidth)
+    end
 
     if vectors !== nothing
         nθ, nφ = size(vectors)
@@ -265,9 +318,11 @@ function main()
     # 2. Rotation scalar Ω + axial vector field φ + spin axis — the spin portrait.
     Ω = rotation_scalar(result)
     φcart = cartesian_field(result.axial, geom)
+    # Ω contours (dark) and φ arrows (white) are both azimuthal and would
+    # merge if same-colored — give the arrows a contrasting colour.
     fig, ax = surface_figure(geom, m, Ω; title="rotation scalar Ω = ⋆dω  +  axial field φ",
                              colormap=:balance, colorrange=symrange(Ω), colorlabel="Ω",
-                             vectors=φcart, vstride=3, vcolor=(:black, 0.6),
+                             vectors=φcart, vstride=3, vcolor=:white,
                              axis=result.axis_embedding, center=center)
     save_views(fig, ax, "rotation_portrait";
                angles=[(1.1π, π / 8), (0.4π, π / 6), (1.1π, 0.46π)])
@@ -277,7 +332,7 @@ function main()
     ωcart = cartesian_field(result.ωinv, geom)
     fig, ax = surface_figure(geom, m, jdens; title="angular-momentum density ω(φ)  +  ω",
                              colormap=:balance, colorrange=symrange(jdens), colorlabel="ω(φ)",
-                             vectors=ωcart, vstride=3, vcolor=(:black, 0.6))
+                             vectors=ωcart, vstride=3, vcolor=:white)
     save_views(fig, ax, "angular_momentum_density")
 
     # 4. Conformal exponent u — where the metric departs from round.
