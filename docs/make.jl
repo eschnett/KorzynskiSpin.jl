@@ -2,12 +2,12 @@
 # (cd docs && julia --project=. make.jl)
 
 using Documenter
-using KorzyńskiSpin
+using KorzynskiSpin
 
 makedocs(;
-    sitename="KorzyńskiSpin.jl",
+    sitename="KorzynskiSpin.jl",
     format=Documenter.HTML(),
-    modules=[KorzyńskiSpin],
+    modules=[KorzynskiSpin],
     pages=["Home" => "index.md", "The algorithm" => "algorithm.md", "Related work" => "related_work.md"],
 )
 

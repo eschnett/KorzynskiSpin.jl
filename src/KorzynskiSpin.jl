@@ -2,7 +2,7 @@
 # decomposition (Class. Quantum Grav. 24, 5935 (2007), arXiv:0707.2824).
 # The algorithm is worked out in detail in docs/algorithm.tex.
 
-module KorzyńskiSpin
+module KorzynskiSpin
 
 using AbstractSphericalHarmonics
 import FastSphericalHarmonics

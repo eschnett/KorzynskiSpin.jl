@@ -1,6 +1,6 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
-"KorzyńskiSpin" = "dddeb715-7fc8-4947-8935-98683755b697"
+"KorzynskiSpin" = "dddeb715-7fc8-4947-8935-98683755b697"
 
 [compat]
 Documenter = "1"

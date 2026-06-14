@@ -1,6 +1,6 @@
 # Visualization scripts
 
-Experimentation scripts for rendering `KorzyńskiSpin.horizon_spin` output as
+Experimentation scripts for rendering `KorzynskiSpin.horizon_spin` output as
 3D figures.  Not part of the package — a sandbox to iterate on.
 
 ## Run

@@ -71,4 +71,4 @@ as eigenvalue problem.
 - ApparentHorizonFinder (to obtain the surface)
 - FastSphericalHarmonics (for spin-weighted spherical harmonics)
 - SpacetimeMetrics (to define metrics)
-- KorzyńskiSpin (earlier, incomplete attempt)
+- KorzynskiSpin (earlier, incomplete attempt)

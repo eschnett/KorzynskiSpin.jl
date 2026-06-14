@@ -1,6 +1,6 @@
 using AbstractSphericalHarmonics
 using ApparentHorizonFinder
-using KorzyńskiSpin
+using KorzynskiSpin
 using LinearAlgebra
 using StaticArrays
 using Test
@@ -23,7 +23,7 @@ function fit_chi_rotation(res::SpinResult, center::SVector{3,Float64})
     return U * V'
 end
 
-@testset "KorzyńskiSpin" begin
+@testset "KorzynskiSpin" begin
     @testset "Round sphere in flat space" begin
         lmax = 12
         res = horizon_spin(shape_embedding((θ, ϕ) -> 1.0), flat3, zero3; lmax=lmax)

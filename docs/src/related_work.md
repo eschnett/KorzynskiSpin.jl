@@ -14,7 +14,7 @@ three groups: a methodologically adjacent (but different) spectral method by
 Jasiulek; the approximate-Killing-vector and Killing-transport spin measures
 implemented in the SpEC and Einstein Toolkit production codes; and
 general-purpose surface-uniformization software from computational conformal
-geometry.  Consequently `KorzyńskiSpin.jl` would, as far as we can
+geometry.  Consequently `KorzynskiSpin.jl` would, as far as we can
 tell, be the first implementation, and validation must rely on analytic
 limits (Kerr, tilted slicings) and on cross-checks against the other spin
 definitions on the same data.
@@ -54,7 +54,7 @@ inverted for the spin.  No conformal decomposition, Ricci flow, or
 Laplacian-eigenfunction construction is used (an adapted-coordinates
 transformation is introduced only for axisymmetric checks), and
  [1] is not cited.  No public code was released.  For the
-`KorzyńskiSpin.jl` test suite, the published Kerr and
+`KorzynskiSpin.jl` test suite, the published Kerr and
 perturbed-black-hole numbers of  [2] are nevertheless a
 useful independent comparison point.
 

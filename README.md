@@ -1,4 +1,4 @@
-# KorzyńskiSpin
+# KorzynskiSpin
 
 Quasi-local spin of a (possibly non-axisymmetric) apparent horizon via
 Korzyński's conformal decomposition:
@@ -21,7 +21,7 @@ package documentation).  A survey of related methods is in
 ## Usage
 
 ```julia
-using KorzyńskiSpin
+using KorzynskiSpin
 using StaticArrays
 
 # Inputs: a parametrized surface and the Cauchy data (γ_ij, K_ij) as
@@ -56,7 +56,7 @@ no derivatives of the Cauchy data are required.
 grid objects, so its result feeds in directly — no interpolation:
 
 ```julia
-using ApparentHorizonFinder, KorzyńskiSpin
+using ApparentHorizonFinder, KorzynskiSpin
 
 horizon = find_horizon(admvars, guess_origin, EquiangularGrid(15), guess_radius)
 result  = horizon_spin(horizon, metric3, excurv3)

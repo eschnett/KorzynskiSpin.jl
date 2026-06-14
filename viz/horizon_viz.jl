@@ -1,4 +1,4 @@
-# Visualize the output of KorzyńskiSpin.horizon_spin as 3D figures.
+# Visualize the output of KorzynskiSpin.horizon_spin as 3D figures.
 #
 # Run with (from this directory):
 #     julia --project=. horizon_viz.jl
@@ -25,7 +25,7 @@ end
 
 using AbstractSphericalHarmonics
 using GeometryBasics: Point3f, Vec3f, TriangleFace, Mesh
-using KorzyńskiSpin
+using KorzynskiSpin
 using LinearAlgebra
 using SpacetimeMetrics
 using StaticArrays

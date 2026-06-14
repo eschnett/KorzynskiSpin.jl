@@ -1,4 +1,4 @@
-# KorzyńskiSpin.jl
+# KorzynskiSpin.jl
 
 Quasi-local spin of a (possibly non-axisymmetric) apparent horizon via
 Korzyński's conformal decomposition (Korzyński, Class. Quantum Grav. **24**,
@@ -24,5 +24,5 @@ quasi-local spin prescriptions and their implementations is in
 ## API reference
 
 ```@autodocs
-Modules = [KorzyńskiSpin]
+Modules = [KorzynskiSpin]
 ```
