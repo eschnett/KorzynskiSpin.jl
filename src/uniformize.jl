@@ -21,6 +21,9 @@ struct Uniformization
     flow_iters::Int
     "number of Newton iterations"
     newton_iters::Int
+    "whether the Newton polish converged to `newton_tol` (`false` ⇒ `u` is the
+     best-effort iterate, stalled at the resolution's aliasing floor)"
+    converged::Bool
 end
 
 "R[e^{2u} q̄] given R̄ and Δ̄u"
@@ -72,7 +75,11 @@ function uniformize(
             # revert and retry with a smaller step
             ucoeffs .= ucoeffs_prev
             dt /= 2
-            dt < 1.0e-6 && error("Ricci flow step size underflow at iteration $iter")
+            # step-size underflow: the flow cannot make further progress from
+            # this iterate (typically an under-resolved, strongly distorted
+            # surface).  Stop the flow gracefully and hand the best iterate so
+            # far to the Newton polish; convergence is judged there.
+            dt < 1.0e-6 && break
             continue
         end
         res ≤ flow_tol && break
@@ -101,6 +108,11 @@ function uniformize(
 
     # --- Newton polish on the Liouville equation ---
     newton_iters = 0
+    # The uniformization is "converged" only when the Newton residual actually
+    # reaches `newton_tol` (genuine convergence to round-off), not when the
+    # iteration merely stalls at the aliasing/near-kernel floor of an
+    # under-resolved surface.
+    newton_converged = false
     if use_newton
         L = Δ̄mat === nothing ? operator_matrix(f -> laplacian(ops̄, f), grid) : Δ̄mat
         R̄half = scalar_coeffs(R̄) ./ 2
@@ -111,9 +123,11 @@ function uniformize(
             e2u = exp.(2 .* uvals)
             F = L * ucoeffs .- R̄half .+ scalar_coeffs(make_scalar(e2u, grid))
             Fnorm = norm(F)
-            if Fnorm ≤ newton_tol * n || Fnorm > 0.5 * Fnorm_prev
-                # converged, or stalled at the aliasing/near-kernel floor
+            if Fnorm ≤ newton_tol * n
+                newton_converged = true   # genuine convergence to round-off
                 break
+            elseif Fnorm > 0.5 * Fnorm_prev
+                break                     # stalled at the aliasing/near-kernel floor
             end
             Fnorm_prev = Fnorm
             J = L + 2 .* multiplication_matrix(make_scalar(e2u, grid))
@@ -137,5 +151,8 @@ function uniformize(
     Δu = laplacian(ops̄, u)
     Rvals = real.(exp.(-2 .* uvals) .* (R̄vals .- 2 .* grid_values(Δu)))
     R = make_scalar(Rvals, grid)
-    return Uniformization(u, R, residual(Rvals), flow_iters, newton_iters)
+    resid = residual(Rvals)
+    # Without the Newton polish, fall back to the flow tolerance.
+    converged = use_newton ? newton_converged : (isfinite(resid) && resid ≤ flow_tol)
+    return Uniformization(u, R, resid, flow_iters, newton_iters, converged)
 end

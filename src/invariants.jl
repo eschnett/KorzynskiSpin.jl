@@ -105,6 +105,10 @@ end
 # Result and driver
 
 struct SpinResult
+    "whether the conformal uniformization converged (Newton reached `newton_tol`);
+     when `false` the spin quantities are best-effort, their quality bounded by
+     `uniformization.residual` (increase `grid` resolution to converge)"
+    success::Bool
     grid::SphereGrid
     "physical area of the surface"
     area::Float64
@@ -158,6 +162,15 @@ The third form accepts the result NamedTuple of
 `grid`, and spin-0 shape coefficients `hlm` in the canonical layout works);
 passing a different `grid` resamples the shape spectrally via
 `ash_resample`.
+
+The returned `SpinResult` carries a `success::Bool`: it is `true` when the
+conformal (Ricci-flow + Newton) uniformization of the induced 2-metric
+converged to `newton_tol`.  A strongly distorted, under-resolved surface
+(e.g. a just-formed common horizon on a coarse grid) may stall at the
+resolution's aliasing floor; then `success == false` and the spin
+quantities are the best-effort iterate, with quality bounded by
+`result.uniformization.residual` (`= ‖R[q̊] − 2‖∞`).  Increase `grid` to
+converge.  The `area` is always valid regardless of `success`.
 """
 function horizon_spin(
     embedding, metric3, excurv3; lmax::Int=24, grid::SphereGrid=EquiangularGrid(lmax), kwargs...
@@ -245,8 +258,8 @@ function horizon_spin_geom(
     end
 
     return SpinResult(
-        grid, geom.area, J, Jvec, Kvec, A, B, β⃗, Jvec′, Kvec′, axis, axis_embedding, axial, geom, unif, eig, gen, ωinv,
-        diagnostics,
+        unif.converged, grid, geom.area, J, Jvec, Kvec, A, B, β⃗, Jvec′, Kvec′, axis, axis_embedding, axial, geom, unif,
+        eig, gen, ωinv, diagnostics,
     )
 end
 

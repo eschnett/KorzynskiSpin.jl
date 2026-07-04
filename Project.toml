@@ -1,6 +1,6 @@
 name = "KorzynskiSpin"
 uuid = "dddeb715-7fc8-4947-8935-98683755b697"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Erik Schnetter <schnetter@gmail.com>"]
 
 [deps]
