@@ -11,7 +11,7 @@ using StaticArrays
 
 export scalar_field, grid_values, make_scalar, grid_coords, integrate_unit, grad, differential
 export imag_norm, real_part, symmetrize, map_fields, scalar_coeffs, coeffs_scalar
-export SurfaceGeometry, surface_geometry, shape_embedding, integrate
+export SurfaceGeometry, surface_geometry, shape_embedding, integrate, pointwise
 export MetricOps, scalar_curvature, laplacian, divergence, operator_matrix, multiplication_matrix
 export Uniformization, uniformize
 export SphereEigenfunctions, sphere_eigenfunctions, MobiusGenerators, mobius_generators

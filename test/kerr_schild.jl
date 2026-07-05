@@ -8,11 +8,14 @@
 using SpacetimeMetrics
 using StaticArrays
 
+# The `::SVector{3}` annotations mark these as per-point providers so
+# KorzynskiSpin auto-wraps them for the batched Cauchy-data interface.
+
 "Spatial metric γ_ij of the t = 0 slice as a function of x⃗"
-slice_metric(m::AbstractMetric) = x -> adm_decompose(m, SVector(0.0, x...))[3]
+slice_metric(m::AbstractMetric) = (x::SVector{3}) -> adm_decompose(m, SVector(0.0, x...))[3]
 
 "Extrinsic curvature K_ij of the t = 0 slice as a function of x⃗"
-slice_excurv(m::AbstractMetric) = x -> ExtrinsicCurvature(m, SVector(0.0, x...))
+slice_excurv(m::AbstractMetric) = (x::SVector{3}) -> ExtrinsicCurvature(m, SVector(0.0, x...))
 
 "Embedding of the Kerr horizon r = r₊ = M + √(M² − a²) (a coordinate spheroid)"
 function ks_horizon_embedding(M, a)

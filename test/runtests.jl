@@ -7,8 +7,10 @@ using Test
 
 include("kerr_schild.jl")
 
-const flat3 = x -> SMatrix{3,3,Float64}(I)
-const zero3 = x -> zero(SMatrix{3,3,Float64})
+# `::SVector{3}` annotations mark these as per-point providers (auto-wrapped
+# for the batched Cauchy-data interface).
+const flat3 = (x::SVector{3}) -> SMatrix{3,3,Float64}(I)
+const zero3 = (x::SVector{3}) -> zero(SMatrix{3,3,Float64})
 
 "Best-fit rotation Λ with χ_i ≈ Λ_ij n_j, n the unit direction from `center`"
 function fit_chi_rotation(res::SpinResult, center::SVector{3,Float64})
@@ -157,6 +159,42 @@ end
         @test res.diagnostics[:boost_consistency] < 1.0e-12
         @test res.diagnostics[:gauss_bonnet] ≈ 0 atol = 1.0e-8
         @test res.diagnostics[:round_residual] < 1.0e-9
+    end
+
+    @testset "Batched Cauchy-data provider interface" begin
+        M, a = 1.0, 0.6
+        lmax = 20
+        ks = KerrSchild(M, a)
+        emb = ks_horizon_embedding(M, a)
+
+        # Reference: auto-detected per-point providers (argument annotated).
+        ref = horizon_spin(emb, slice_metric(ks), slice_excurv(ks); lmax=lmax)
+
+        # Native batched providers: called once with the whole grid of points,
+        # returning an array of the same shape.  Also count the invocations.
+        mcalls = Ref(0)
+        kcalls = Ref(0)
+        metric_batched = function (Xs)
+            mcalls[] += 1
+            return map(slice_metric(ks), Xs)
+        end
+        excurv_batched = function (Xs)
+            kcalls[] += 1
+            return map(slice_excurv(ks), Xs)
+        end
+        res_batched = horizon_spin(emb, metric_batched, excurv_batched; lmax=lmax)
+        @test res_batched.J == ref.J
+        @test res_batched.area == ref.area
+        # A single batched call per provider, not one per collocation point.
+        @test mcalls[] == 1
+        @test kcalls[] == 1
+
+        # Bare (untyped) per-point closures wrapped explicitly with `pointwise`.
+        bare_metric = x -> slice_metric(ks)(x)
+        bare_excurv = x -> slice_excurv(ks)(x)
+        res_pointwise = horizon_spin(emb, pointwise(bare_metric), pointwise(bare_excurv); lmax=lmax)
+        @test res_pointwise.J == ref.J
+        @test res_pointwise.area == ref.area
     end
 
     @testset "Schwarzschild horizon (Kerr–Schild slice)" begin

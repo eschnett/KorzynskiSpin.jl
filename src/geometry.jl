@@ -2,9 +2,18 @@
 #
 # Inputs are three callables:
 #   embedding(θ, ϕ) :: SVector{3}  — surface point in Cartesian slice coordinates
-#   metric3(x)      :: SMatrix{3,3} — spatial metric γ_ij at x
-#   excurv3(x)      :: SMatrix{3,3} — extrinsic curvature K_ij at x,
-#                                     convention K_ij = −(1/2) £_n γ_ij
+#   metric3, excurv3               — the Cauchy data γ_ij and K_ij (extrinsic
+#     curvature convention K_ij = −(1/2) £_n γ_ij).  These use the *batched*
+#     interface: a callable
+#         Xs::AbstractArray{SVector{3,Float64}} -> AbstractArray{SMatrix{3,3}}
+#     that receives **all** queried points at once (a grid-shaped matrix) and
+#     returns the value at each, in an array of the **same shape**.  Evaluating
+#     all points together lets the caller parallelize the metric evaluation
+#     (threads, pmap, GPU, batched autodiff, …).  For backward compatibility a
+#     per-point callable x::SVector{3} -> SMatrix{3,3} is still accepted: one
+#     whose argument is annotated ::SVector{3} is detected and wrapped
+#     automatically, and a bare (untyped) per-point closure can be wrapped
+#     explicitly with `pointwise`.
 # The embedding is differentiated *spectrally*, so no analytic derivatives
 # are required.
 
@@ -34,6 +43,29 @@ function shape_embedding(h; center::SVector{3,Float64}=SVector(0.0, 0.0, 0.0))
     end
 end
 
+# Adapt a user field provider to the batched interface
+#     batched:  Xs::AbstractArray{<:SVector{3}} -> AbstractArray
+# A pointwise provider (x::SVector{3} -> value) is NOT applicable to an array of
+# points and is wrapped via `map`. Detection is type-based (`applicable`), so it
+# is cheap and independent of the array's shape or contents. A single `SVector`
+# is itself a 1-D `AbstractArray`, so the probe uses a `Matrix` (never mistaken
+# for one point) to avoid false positives.
+function _batched(f)
+    sample = Matrix{SVector{3,Float64}}(undef, 0, 0)
+    return applicable(f, sample) ? f : Xs -> map(f, Xs)
+end
+
+"""
+    pointwise(f) -> batched callable
+
+Wrap a per-point Cauchy-data provider `f(x::SVector{3,Float64}) -> SMatrix{3,3}`
+so it can be passed to [`horizon_spin`](@ref) / [`surface_geometry`](@ref) under
+the batched API (see [`surface_geometry`](@ref)). This is only needed for bare
+(untyped) closures that auto-detection cannot classify; a function whose
+argument is annotated `::SVector{3}` is detected and wrapped automatically.
+"""
+pointwise(f) = Xs -> map(f, Xs)
+
 """
     surface_geometry(embedding, metric3, excurv3, grid) -> SurfaceGeometry
     surface_geometry(x::AbstractMatrix{SVector{3,Float64}}, metric3, excurv3, grid)
@@ -43,6 +75,12 @@ first form evaluates the callable `embedding(θ, ϕ)::SVector{3}` at the
 collocation points of `grid`; the second form accepts the surface points
 directly (size `ash_grid_size(grid)`), e.g. from
 `ApparentHorizonFinder.horizon_points`.
+
+`metric3` and `excurv3` supply the Cauchy data through the batched interface
+`Xs::AbstractArray{SVector{3}} -> AbstractArray{SMatrix{3,3}}` (see the module
+header).  A per-point callable annotated `x::SVector{3} -> SMatrix{3,3}` is
+detected and wrapped automatically; wrap a bare untyped closure with
+[`pointwise`](@ref).
 """
 function surface_geometry(embedding, metric3, excurv3, grid::SphereGrid)
     coords = grid_coords(grid)
@@ -54,9 +92,9 @@ function surface_geometry(x::AbstractMatrix{SVector{3,Float64}}, metric3, excurv
     sz = ash_grid_size(grid)
     size(x) == sz || throw(DimensionMismatch("surface points have size $(size(x)), expected $(sz) for this grid"))
 
-    # Cauchy data at the points
-    γ = [SMatrix{3,3,Float64}(metric3(xi)) for xi in x]
-    K = [SMatrix{3,3,Float64}(excurv3(xi)) for xi in x]
+    # Cauchy data at every surface point, evaluated in a single batched call.
+    γ = SMatrix{3,3,Float64}.(_batched(metric3)(x))
+    K = SMatrix{3,3,Float64}.(_batched(excurv3)(x))
 
     # Tangents E[a,i] = ∇̂_a x^i, computed spectrally component by component
     dx = ntuple(i -> grad(make_scalar(map(v -> v[i], x), grid)), 3)

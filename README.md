@@ -38,6 +38,14 @@ result.axial           # axial vector field on the surface (dyad components)
 result.diagnostics     # residuals of the internal identities
 ```
 
+`metric3` and `excurv3` use a *batched* interface: they may be given as
+callables `Xs -> array` that receive **all** collocation points at once (a
+grid-shaped `Matrix{SVector{3}}`) and return γ_ij / K_ij in an array of the
+same shape, so the caller can parallelize the evaluation (threads, `pmap`, GPU,
+batched autodiff).  A per-point callable is still accepted: one whose argument
+is annotated `x::SVector{3}` (as above) is detected and wrapped automatically,
+and a bare untyped closure can be wrapped explicitly with `pointwise`.
+
 For a horizon given as a radial shape function $h(\theta,\phi)$ about a
 centre (as produced by an apparent horizon finder), use
 `shape_embedding(h; center=c)`.

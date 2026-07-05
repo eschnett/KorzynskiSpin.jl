@@ -149,9 +149,13 @@ end
     horizon_spin(horizon::NamedTuple, metric3, excurv3; grid=horizon.grid, kwargs...)
 
 Compute the Korzyński quasi-local spin of the surface
-x(θ,ϕ) = `embedding(θ,ϕ)::SVector{3}` in the Cauchy slice with data
-`metric3(x)::SMatrix{3,3}` (γ_ij) and `excurv3(x)::SMatrix{3,3}` (K_ij,
-convention K_ij = −(1/2)£_n γ_ij).
+x(θ,ϕ) = `embedding(θ,ϕ)::SVector{3}` in the Cauchy slice with Cauchy data
+`metric3` (γ_ij) and `excurv3` (K_ij, convention K_ij = −(1/2)£_n γ_ij).
+These use the *batched* provider interface
+`Xs::AbstractArray{SVector{3}} -> AbstractArray{SMatrix{3,3}}` (all queried
+points at once, so the caller can parallelize; see [`surface_geometry`](@ref)).
+A per-point callable annotated `x::SVector{3} -> SMatrix{3,3}` is detected and
+wrapped automatically; wrap a bare untyped closure with [`pointwise`](@ref).
 
 The second form accepts the surface points at the collocation points of
 `grid` directly (by default `EquiangularGrid(size(points, 1) - 1)`, matching
