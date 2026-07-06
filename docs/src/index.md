@@ -5,7 +5,8 @@ Korzyński's conformal decomposition (Korzyński, Class. Quantum Grav. **24**,
 5935 (2007), [arXiv:0707.2824](https://arxiv.org/abs/0707.2824)).
 
 The method is worked out in full detail in [The algorithm](@ref "Algorithm") — from the Cauchy data and horizon shape through the
-rotation one-form, Hodge gauge fixing, uniformization by Ricci flow, the
+rotation one-form, Hodge gauge fixing, uniformization by a fast conformal
+flow, the
 Möbius generators, and the invariants ``\vec J``, ``\vec K`` to the spin
 ``J``, the spin axis, and the axial vector field.  A survey of other
 quasi-local spin prescriptions and their implementations is in

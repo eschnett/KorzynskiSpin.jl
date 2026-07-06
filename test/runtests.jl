@@ -116,7 +116,7 @@ end
         @test maximum(gdev) - minimum(gdev) < 1.0e-12   # recovered up to a constant
 
         R̄ = make_scalar(fill(2.0 + 0im, size(grid_values(f))), grid)
-        unif = uniformize(ops, R̄; Δ̄mat=Δmat)
+        unif = uniformize(ops, R̄)
         eig = sphere_eigenfunctions(ops, unif.u; Δ̄mat=Δmat)
         gen = mobius_generators(ops, unif.u, eig)
         Jvec = SVector{3}(momentum_integral(geom, ωinv, gen.φ[i]) for i in 1:3)

@@ -8,8 +8,8 @@ decomposition of its two-metric and the action of the Möbius group of the
 sphere.  These notes turn that definition into a concrete numerical algorithm:
 starting from the shape function ``h(\theta,\varphi)`` of an apparent horizon and
 the Cauchy data ``(\gamma_{ij},K_{ij})`` at its collocation points, we construct
-the induced two-metric, the rotation one-form, uniformize the metric by
-two-dimensional Ricci flow, obtain the Möbius generators directly in the
+the induced two-metric, the rotation one-form, uniformize the metric by a
+fast conformal flow, obtain the Möbius generators directly in the
 original coordinates from the first eigenfunctions of the round Laplacian, and
 evaluate the invariants ``\vec{J}`` and ``\vec{K}`` (eqs. (12) and (13) of
  [1]), the spin ``J``, the spin axis, and the axial vector field
@@ -17,7 +17,7 @@ evaluate the invariants ``\vec{J}`` and ``\vec{K}`` (eqs. (12) and (13) of
 based on spin-weighted spherical harmonics, and we collect the corrections and
 simplifications relative to the algorithm skeleton in `GOAL.md`; the
 most important one is that no explicit “good” coordinate system needs to be
-constructed and the Ricci flow never needs to be “undone”.
+constructed and the uniformization never needs to be “undone”.
 
 
 
@@ -49,7 +49,7 @@ K_{ij} \;=\; -\tfrac12 \mathcal{L}_n \gamma_{ij}
   ``\epsilon_{\theta\varphi}=+\sqrt{\det q}>0``.  Reversing the orientation
   flips ``\vec{J}``, ``\vec{K}`` and ``\phi``.
 - A ring denotes quantities of the *unit-round representative*
-  ``\mathring{q}_{AB}`` produced by the Ricci flow (area ``4\pi``, ``R[\mathring{q}]=2``):
+  ``\mathring{q}_{AB}`` produced by the uniformization (area ``4\pi``, ``R[\mathring{q}]=2``):
   ``\mathring{\epsilon}_{AB}``, ``\mathring{D}_A``, ``\mathring{\Delta}``.  A hat denotes quantities of the
   *unit coordinate sphere* ``\hat q = \mathrm{d}\theta^2 +
   \sin^2\!\theta\,\mathrm{d}\varphi^2`` in the given chart, which serves only as a
@@ -370,7 +370,7 @@ through the horizon.
 
 ### Ricci scalar of the two-metric
 
-The flow in the section [Uniformization by normalized Ricci flow](@ref "Uniformization by normalized Ricci flow") needs ``R[q]``.  In any chart,
+The uniformization in the section [Uniformization by a fast flow](@ref "Uniformization by a fast flow") needs ``R[q]``.  In any chart,
 ```math
 \Gamma^C_{AB} = \tfrac12\, q^{CD}\bigl(\partial_A q_{DB}
                   + \partial_B q_{AD} - \partial_D q_{AB}\bigr),
@@ -403,7 +403,7 @@ Similarly, for any scalar ``f``,
 \tag{31}
 ```
 
-### Uniformization by normalized Ricci flow
+### Uniformization by a fast flow
 
 First rescale to unit area: let
 ```math
@@ -442,25 +442,10 @@ curvature metric: ``u(t)\to u_\infty`` with
 This ``\mathring{q}`` is the unit-round representative of the conformal class of ``q``,
 expressed in the original chart.  Equivalently, the conformal factor of
 (6) is ``F = (\mathcal{A}/4\pi)\,\mathrm{e}^{-2u_\infty}``.
+The flow serves here as the existence and uniqueness argument for
+``u_\infty``; it is not integrated numerically.
 
-**Time integration.**
-The linearization of (34) is
-``\partial_t\,\delta u = \mathrm{e}^{-2u}\bar\Delta\,\delta u - R(t)\,\delta u``,
-so explicit integrators need
-``\Delta t \lesssim c\,\min(\mathrm{e}^{2u})\,/\,\ell_{\max}(\ell_{\max}+1)``
-(times the smallest eigenvalue scale of ``\bar q`` relative to ``\hat q``); an
-adaptive explicit Runge–Kutta scheme is adequate at moderate resolution.  At
-high ``\ell_{\max}`` use an IMEX or exponential integrator, treating the
-constant-coefficient operator ``\Lambda = \hat\Delta`` (diagonal in the
-spherical-harmonic basis, eigenvalues ``-\ell(\ell+1)``) implicitly and the
-remainder ``1 - \tfrac12 R - \kappa\hat\Delta u`` explicitly, with a constant
-``\kappa \approx \max(\mathrm{e}^{-2u}\,\lambda_{\bar q})`` chosen for stability.
-Monitor ``\lVert R(t)-2\rVert_\infty`` and stop when it reaches the requested
-tolerance; also monitor ``\oint \mathrm{e}^{2u}\bar\epsilon = 4\pi`` (preserved by
-(34) up to time-discretization error; renormalize ``u`` by a
-constant if it drifts).
-
-**Newton polish (recommended).**
+**The Liouville equation.**
 The fixed point of (34) satisfies the Liouville-type
 elliptic equation
 ```math
@@ -486,15 +471,49 @@ the section [The first eigenfunctions of the round Laplacian](@ref "The first ei
 round representatives, all equally acceptable), and the kernel directions
 are its tangent, ``\delta u = \chi_i``, matching the conformal Killing flow
 ``\mathcal{L}_{\xi_i}\mathring{q} = 2\chi_i\,\mathring{q}``.  Constants are a positive direction
-(``(\mathring{\Delta}+2)\,c = 2c``) and ``\ell\ge2`` modes are negative.  In practice:
-use MINRES (not CG) for the Newton steps and take minimal-norm steps, or
-deflate/project out the three near-kernel modes; drift along the kernel is
-pure gauge and harmless.  Convergence is then quadratic transverse to the
-gauge orbit.  The most efficient strategy is: integrate
-(34) until ``\lVert R-2\rVert_\infty \lesssim 10^{-2}`` (the
-flow is unconditionally globally convergent and needs no good initial guess),
-then polish with Newton to round-off.  Pure Ricci flow alone is also fine,
-merely slower.
+(``(\mathring{\Delta}+2)\,c = 2c``) and ``\ell\ge2`` modes are negative.  Drift along
+the kernel is pure gauge and harmless.
+
+**The fast flow.**
+We solve (36) by a fast flow in the style of
+Gundlach's pseudo-spectral apparent-horizon finder [9]: an
+approximate Newton iteration whose model Jacobian is diagonal in the
+spherical-harmonic basis of the chart.  Two exact identities drive it:
+pointwise
+```math
+\mathcal{N}[u] = -\tfrac12\,\mathrm{e}^{2u}\bigl(R(t)-2\bigr),
+\qquad
+\mathcal{N}'[u] = \bar\Delta + 2\mathrm{e}^{2u} = \mathrm{e}^{2u}\bigl(\Delta_{q(t)} + 2\bigr),
+```
+with ``q(t) = \mathrm{e}^{2u}\bar q`` and ``R(t) = R[q(t)]`` from (34), using
+(2).  The exact Newton step is therefore
+``\delta u = (\Delta_{q(t)}+2)^{-1}\,(R(t)-2)/2``.  The fast flow replaces
+``\Delta_{q(t)}`` by the unit-sphere Laplacian ``\hat\Delta`` (diagonal,
+eigenvalues ``-\ell(\ell+1)``), scaled by a stability constant ``\kappa``:
+```math
+\delta u_{\ell m}
+  = \frac{\bigl[(R(t)-2)/2\bigr]_{\ell m}}{2 - \kappa\,\ell(\ell+1)} ,
+```
+iterated with ``u(0) = 0`` and the area renormalized to exactly ``4\pi``
+after every step (a constant shift of ``u``).  Unlike the operator of the
+horizon-finding problem, the model operator here is indefinite (``+2`` at
+``\ell=0``, ``0`` at ``\ell=1``, negative for ``\ell\ge2``), so the signed
+mode-wise inverse replaces the single-sign damping of [9]; the
+vanishing ``\ell=1`` eigenvalue (the Möbius gauge kernel above) is replaced
+by the adjacent ``\ell=2`` value ``2-6\kappa``, which is safe because at the
+solution the residual has no component along the kernel.  ``\kappa`` is the
+Richardson midpoint ``(c_{\min}+c_{\max})/2`` (floored at ``1``) of the
+pointwise eigenvalue range of ``\mathrm{e}^{-2u}\bar q^{AB}`` relative to
+``\hat q``, which keeps the high-``\ell`` iteration factors ``1 - c/\kappa``
+inside ``(-1,1)`` for anisotropic metrics.  The iteration converges linearly;
+the contraction per step is set by the chart distortion and anisotropy of
+``\bar q`` (the model is diagonal in the *chart's* harmonic basis, while
+``\mathring{q}`` is round only up to a diffeomorphism), but not by the resolution.
+Convergence is declared when the L² norm of the coefficients of
+``(R(t)-2)/2`` reaches the requested tolerance; three consecutive iterations
+without a 1% improvement of the best residual signal the resolution's
+round-off/aliasing floor, and the best iterate is returned as a best-effort
+result.
 
 **A fully linear alternative: flattening through a puncture.**
 Although (36) cannot be linearized by a change of variables,
@@ -522,8 +541,8 @@ in closed form,
   \qquad
   \mathring{q} = \frac{4\,\mathrm{d} z\,\mathrm{d}\bar z}{(1+|z|^2)^2},
 ```
-so this route replaces *both* the flow of
-the section [Uniformization by normalized Ricci flow](@ref "Uniformization by normalized Ricci flow") *and* the eigenproblem of
+so this route replaces *both* the fast flow of
+the section [Uniformization by a fast flow](@ref "Uniformization by a fast flow") *and* the eigenproblem of
 the section [The first eigenfunctions of the round Laplacian](@ref "The first eigenfunctions of the round Laplacian").  The arbitrary choices (the puncture ``p``, the
 normalization of the conjugate pair) move the resulting CSCS by exactly a
 Möbius transformation, which the invariants of
@@ -531,9 +550,9 @@ the section [Invariants, boost, spin, axis, and axial vector field](@ref "Invari
 singular sources: to retain spectral accuracy the logarithm and the pole
 must be split off analytically (solve for the smooth remainders), which on
 a curved background ``\bar q`` requires local expansions around ``p``.  Since
-the Newton polish above costs only a handful of smooth linear solves anyway,
-we keep flow``+``Newton as the mainline and recommend the puncture method as
-an independent cross-check of the uniformization stage.
+the fast flow above costs only a short sequence of diagonally preconditioned
+smooth iterations anyway, we keep it as the mainline and recommend the
+puncture method as an independent cross-check of the uniformization stage.
 
 ### The first eigenfunctions of the round Laplacian
 
@@ -625,7 +644,7 @@ the skeleton in `GOAL.md`: the generators
 (7)–(8) can be written covariantly in terms of
 ``\mathring{q}`` and ``\chi_i`` and therefore evaluated *directly in the original
 coordinates*, without ever constructing the good coordinates
-``(\theta_1,\varphi_1)`` and without “undoing” the Ricci flow.
+``(\theta_1,\varphi_1)`` and without “undoing” the uniformization.
 
 **Lemma 1.**
 Let ``\mathring{q}`` be a unit-round metric on ``S^2`` and ``\chi_i`` a normalized,
@@ -694,7 +713,7 @@ Concretely, at every collocation point:
 The fields (45) are normalization-correct (``2\pi``-periodic
 orbits for ``n_i\phi_i``) precisely because ``\mathring{q}`` has area ``4\pi`` and the
 ``\chi_i`` obey (41)–(43); this is why the area
-normalization of the section [Uniformization by normalized Ricci flow](@ref "Uniformization by normalized Ricci flow") matters.
+normalization of the section [Uniformization by a fast flow](@ref "Uniformization by a fast flow") matters.
 
 ### Invariants, boost, spin, axis, and axial vector field
 
@@ -813,13 +832,13 @@ horizon (the dynamic range of ``F``).
 
 ### Elliptic solves and the eigenproblem
 
-The operators ``\Delta_q`` (for (26)), the Newton operator
-``\bar\Delta + 2\mathrm{e}^{2u}`` (for (36)), and ``\bar\Delta + 2
-\mathrm{e}^{2u_\infty}`` (shift-invert in (39)) are all of the
+The operators ``\Delta_q`` (for (26)) and ``\bar\Delta + 2
+\mathrm{e}^{2u_\infty}`` (shift-invert in (39)) are of the
 form “unit-sphere Laplacian plus smooth corrections”.  Apply them
 matrix-free on spherical-harmonic coefficients (transform ``\to`` pointwise
 algebra ``\to`` transform) and solve with preconditioned CG/MINRES, using the
-diagonal unit-sphere Laplacian ``-\ell(\ell+1)`` (shifted) as preconditioner.
+diagonal unit-sphere Laplacian ``-\ell(\ell+1)`` (shifted) as preconditioner;
+the fast flow of the section [Uniformization by a fast flow](@ref "Uniformization by a fast flow") needs no linear solves at all.
 For moderate resolution (``\ell_{\max}\lesssim 50``, i.e.
 ``(\ell_{\max}+1)^2 \lesssim 2600`` modes) dense assembly and direct
 factorization/eigensolution is perfectly affordable and simplest.
@@ -838,7 +857,7 @@ separated, so convergence is fast and unambiguous.
 Cheap, sharp internal checks, in pipeline order:
 - spectral tail of ``h``, ``q_0``, ``q_2`` (input resolution);
 - Gauss–Bonnet: ``\oint R[q]\,\epsilon = 8\pi``;
-- Ricci flow / Newton: ``\lVert R[\mathring{q}]-2\rVert_\infty``, area drift;
+- uniformization (fast flow): ``\lVert R[\mathring{q}]-2\rVert_\infty``, area drift;
 - eigencluster: ``|\mu_i + 2|`` for the three eigenvalues, residuals
   ``\lVert\bar\Delta\chi_i + 2\mathrm{e}^{2u_\infty}\chi_i\rVert``;
 - rigidity: ``\lVert \delta^{ij}\chi_i\chi_j - 1\rVert_\infty`` and
@@ -866,8 +885,8 @@ Cheap, sharp internal checks, in pipeline order:
   ``\omega^{\mathrm{inv}} = \omega - \mathrm{d} g`` \ (26).
 - **Normalize.**  ``\bar q = (4\pi/\mathcal{A})\,q``; compute
   ``\bar R`` \ (30).
-- **Uniformize.**  Ricci flow (34) (optionally
-  Newton polish (36)) ``\to u_\infty``,
+- **Uniformize.**  Fast flow on the Liouville equation
+  (36) ``\to u_\infty``,
   ``\mathring{q} = \mathrm{e}^{2u_\infty}\bar q`` with ``R[\mathring{q}]=2``.
 - **Eigenfunctions.**  Solve
   ``\bar\Delta\chi = -2\mathrm{e}^{2u_\infty}\chi`` for the triple near ``-2``;
@@ -1043,6 +1062,11 @@ J. Math. Soc. Japan **18**, 380–385 (1966).
 *Approximate Killing vectors on ``S^2``*,
 Phys. Rev. D **76**, 041501(R) (2007);
 [arXiv:0706.0199 [gr-qc]](https://arxiv.org/abs/0706.0199).
+
+9. C. Gundlach,
+*Pseudo-spectral apparent horizon finders: an efficient new algorithm*,
+Phys. Rev. D **57**, 863 (1998);
+[arXiv:gr-qc/9707050](https://arxiv.org/abs/gr-qc/9707050).
 
 
 

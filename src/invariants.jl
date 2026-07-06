@@ -105,9 +105,10 @@ end
 # Result and driver
 
 struct SpinResult
-    "whether the conformal uniformization converged (Newton reached `newton_tol`);
-     when `false` the spin quantities are best-effort, their quality bounded by
-     `uniformization.residual` (increase `grid` resolution to converge)"
+    "whether the conformal uniformization converged (the fast flow reached
+     `unif_tol`); when `false` the spin quantities are best-effort, their
+     quality bounded by `uniformization.residual` (increase `grid` resolution
+     to converge)"
     success::Bool
     grid::SphereGrid
     "physical area of the surface"
@@ -168,8 +169,9 @@ passing a different `grid` resamples the shape spectrally via
 `ash_resample`.
 
 The returned `SpinResult` carries a `success::Bool`: it is `true` when the
-conformal (Ricci-flow + Newton) uniformization of the induced 2-metric
-converged to `newton_tol`.  A strongly distorted, under-resolved surface
+conformal uniformization of the induced 2-metric (a Gundlach-style fast
+flow, see [`uniformize`](@ref)) converged to `unif_tol`.  A strongly
+distorted, under-resolved surface
 (e.g. a just-formed common horizon on a coarse grid) may stall at the
 resolution's aliasing floor; then `success == false` and the spin
 quantities are the best-effort iterate, with quality bounded by
@@ -189,10 +191,8 @@ function horizon_spin_geom(
     metric3,
     excurv3,
     grid::SphereGrid;
-    flow_tol::Float64=1.0e-3,
-    flow_maxiter::Int=10_000,
-    newton_tol::Float64=1.0e-13,
-    use_newton::Bool=true,
+    unif_tol::Float64=1.0e-13,
+    unif_maxiter::Int=1000,
 )
     diagnostics = Dict{Symbol,Float64}()
 
@@ -220,7 +220,7 @@ function horizon_spin_geom(
     ops̄ = MetricOps(map_fields(v -> v ./ s, geom.q))
     Δ̄mat = s .* Δmat
     R̄ = make_scalar(s .* grid_values(R), grid)
-    unif = uniformize(ops̄, R̄; Δ̄mat=Δ̄mat, flow_tol=flow_tol, flow_maxiter=flow_maxiter, newton_tol=newton_tol, use_newton=use_newton)
+    unif = uniformize(ops̄, R̄; tol=unif_tol, maxiter=unif_maxiter)
     diagnostics[:round_residual] = unif.residual
 
     # §3.7: eigenfunctions

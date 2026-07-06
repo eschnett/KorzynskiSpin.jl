@@ -9,8 +9,9 @@ Korzyński's conformal decomposition:
   [arXiv:0707.2824 [gr-qc]](https://arxiv.org/abs/0707.2824).
 
 The algorithm — induced metric and rotation one-form from Cauchy data, Hodge
-gauge fixing, uniformization by two-dimensional Ricci flow with Newton
-polish, the ℓ=1 eigenfunctions of the round Laplacian, the Möbius generators
+gauge fixing, uniformization by a Gundlach-style fast flow
+([arXiv:gr-qc/9707050](https://arxiv.org/abs/gr-qc/9707050)), the ℓ=1
+eigenfunctions of the round Laplacian, the Möbius generators
 in the original chart, and the invariants $\vec J$, $\vec K$, the spin
 $J = \sqrt{(A+\sqrt{A^2+4B^2})/2}$, the spin axis, and the axial vector
 field — is worked out in detail in
