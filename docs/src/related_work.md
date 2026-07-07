@@ -23,8 +23,8 @@ definitions on the same data.
 
 ## Summary
 
-A search of the citation record of  [1] (via Semantic
-Scholar and arXiv full-text search, June 2026) finds only a handful of
+A search of the citation record of  [1], via Semantic
+Scholar and arXiv full-text search (June 2026), finds only a handful of
 citing works, none of which implements the method: they are reviews
  [13, 14], theoretical developments
  [10, 11, 12], and numerical-relativity papers that
@@ -75,7 +75,7 @@ All widely used codes evaluate the same surface integral
 vector ``\phi``:
 
 - **SpEC: approximate Killing vectors.**  The Cook–Whiting
-  construction  [4] (further developed by Owen) finds the
+  construction  [4], further developed by Owen, finds the
   vector field minimizing a Killing-equation residual by solving a
   generalized eigenvalue problem on the horizon.  It is the standard spin
   diagnostic in the SXS collaboration's SpEC code, used e.g. for
