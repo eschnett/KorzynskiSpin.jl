@@ -1,5 +1,7 @@
 # Generate documentation with this command:
-# (cd docs && julia --project=. make.jl)
+# (cd docs && julia make.jl)
+
+push!(LOAD_PATH, "..")
 
 using Documenter
 using KorzynskiSpin
