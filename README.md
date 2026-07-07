@@ -1,5 +1,8 @@
 # KorzynskiSpin
 
+[![CI](https://github.com/eschnett/KorzynskiSpin.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/eschnett/KorzynskiSpin.jl/actions/workflows/CI.yml)
+[![Documentation](https://github.com/eschnett/KorzynskiSpin.jl/actions/workflows/docs.yml/badge.svg)](https://eschnett.github.io/KorzynskiSpin.jl/)
+
 Quasi-local spin of a (possibly non-axisymmetric) apparent horizon via
 Korzyński's conformal decomposition:
 
