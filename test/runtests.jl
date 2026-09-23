@@ -298,4 +298,116 @@ end
         @test dot(Jv″, Jv″) - dot(Kv″, Kv″) ≈ dot(Jv, Jv) - dot(Kv, Kv) atol = 1.0e-12
         @test dot(Jv″, Kv″) ≈ dot(Jv, Kv) atol = 1.0e-12
     end
+
+    @testset "Balanced frame: uniqueness and chart independence" begin
+        # an ellipsoid in a Möbius-distorted chart: the flow lands on an
+        # unbalanced round metric, the balancing does not
+        abc = SVector(1.0, 1.2, 0.8)
+        r̂(θ, ϕ) = SVector(sin(θ) * cos(ϕ), sin(θ) * sin(ϕ), cos(θ))
+        Λb = KorzynskiSpin.boost_matrix(SVector(0.15, -0.1, 0.2))
+        res1 = horizon_spin((θ, ϕ) -> abc .* r̂(θ, ϕ), flat3, zero3; lmax=32)
+        res2 = horizon_spin((θ, ϕ) -> abc .* KorzynskiSpin.mobius_point(Λb, r̂(θ, ϕ))[1], flat3, zero3; lmax=32)
+        mp1 = horizon_multipoles(res1; lmax=4)
+        mp2 = horizon_multipoles(res2; lmax=4)
+        @test mp2.diagnostics[:balance_iters] ≥ 1
+        for mp in (mp1, mp2)
+            @test mp.diagnostics[:dipole_residual] < 1.0e-13
+            @test mp.diagnostics[:I00_offset] < 1.0e-12
+            @test mp.diagnostics[:conjugation] < 1.0e-12
+            @test mp.diagnostics[:invariant_A] < 1.0e-12
+            @test maximum(abs.(values(mp.L))) < 1.0e-12        # no rotation
+        end
+        # (observed: 2e-11)
+        @test maximum(abs(mp1.I[k] - mp2.I[k]) for k in keys(mp1.I)) < 1.0e-9
+        @test real(mp1.I[(2, 0)]) > 0.1                        # genuinely deformed
+        @test maximum(abs(mp1.I[k]) for k in keys(mp1.I) if isodd(k[2])) < 1.0e-12   # reflection symmetry
+
+        # Uniqueness: balancing from an arbitrarily boosted start lands on the
+        # same round metric
+        Λ0 = KorzynskiSpin.boost_matrix(SVector(-0.1, 0.3, 0.25))
+        χ0 = KorzynskiSpin.point_triple(res1.eigenfunctions.χ)
+        imgs = map(c -> KorzynskiSpin.mobius_point(Λ0, c), χ0)
+        χp = ntuple(i -> make_scalar(map(p -> p[1][i], imgs), res1.grid), 3)
+        up = make_scalar(real.(grid_values(res1.uniformization.u)) .+ map(p -> log(p[2]), imgs), res1.grid)
+        bal0 = balance_frame(res1.geometry, res1.uniformization.u, res1.eigenfunctions.χ)
+        balp = balance_frame(res1.geometry, up, χp)
+        @test balp.converged && balp.iters ≥ 2
+        @test maximum(abs.(real.(grid_values(balp.u)) .- real.(grid_values(bal0.u)))) < 1.0e-12
+    end
+
+    @testset "Kerr horizon multipoles (balanced frame)" begin
+        M, a = 1.0, 0.6
+        lmax = 20
+        ks = KerrSchild(M, a)
+        res = horizon_spin(ks_horizon_embedding(M, a), slice_metric(ks), slice_excurv(ks); lmax=lmax)
+        mp = horizon_multipoles(res; lmax=6)
+        @test mp.diagnostics[:dipole_residual] < 1.0e-13
+        @test mp.diagnostics[:I00_offset] < 1.0e-12
+        @test mp.diagnostics[:L00] < 1.0e-12
+        @test mp.diagnostics[:invariant_A] < 1.0e-12
+        @test mp.diagnostics[:invariant_B] < 1.0e-12
+        # the canonical round sphere is Gourgoulhon et al.'s z(cos θ)
+        # (observed: 1e-12)
+        r₊ = M + sqrt(M^2 - a^2)
+        zerr = maximum(CartesianIndices(size(res.geometry.x))) do ij
+            abs(real(grid_values(mp.χ[3])[ij]) - kerr_balanced_z(M, a, res.geometry.x[ij][3] / r₊))
+        end
+        @test zerr < 1.0e-10
+        @test mp.L1vec[3] > 0                                  # current dipole ∥ spin
+        # closed-form multipoles (observed at lmax=20: ≤ 5e-12)
+        for l in 0:6
+            ref = kerr_multipole(M, a, l)
+            @test mp.I[(l, 0)] ≈ real(ref) atol = 1.0e-10
+            @test mp.L[(l, 0)] ≈ imag(ref) atol = 1.0e-10
+            for m in (-l):l
+                m == 0 && continue
+                @test abs(mp.I[(l, m)]) + abs(mp.L[(l, m)]) < 1.0e-12   # axisymmetry
+            end
+        end
+
+        # Schwarzschild: only the universal monopole survives
+        res0 = horizon_spin(
+            ks_horizon_embedding(M, 0.0), slice_metric(KerrSchild(M, 0.0)), slice_excurv(KerrSchild(M, 0.0)); lmax=12
+        )
+        mp0 = horizon_multipoles(res0; lmax=4)
+        @test maximum(abs(mp0.I[k]) + abs(mp0.L[k]) for k in keys(mp0.I) if k[1] ≥ 1) < 1.0e-12
+
+        # Rotated and translated data: the orientation fixing (ẑ ∥ current
+        # dipole) makes the multipoles identical
+        n̂ = SVector(1.0, 2.0, 2.0) / 3
+        ψ, θr = atan(n̂[2], n̂[1]), acos(n̂[3])
+        b = SVector(0.3, -0.2, 0.1)
+        m = translate(rotate(ks, ψ, θr, 0.0), SVector(0.0, b...))
+        cψ, sψ, cθ, sθ = cos(ψ), sin(ψ), cos(θr), sin(θr)
+        Λ = SMatrix{3,3}(cψ * cθ, sψ * cθ, -sθ, -sψ, cψ, 0, cψ * sθ, sψ * sθ, cθ)
+        emb0 = ks_horizon_embedding(M, a)
+        resr = horizon_spin((θ, ϕ) -> Λ * emb0(θ, ϕ) + b, slice_metric(m), slice_excurv(m); lmax=lmax)
+        mpr = horizon_multipoles(resr; lmax=6)
+        @test maximum(abs(mpr.I[k] - mp.I[k]) + abs(mpr.L[k] - mp.L[k]) for k in keys(mp.I)) < 1.0e-10
+    end
+
+    @testset "Kerr multipoles on boosted slices (ApparentHorizonFinder shape)" begin
+        # All cross-sections of a Killing horizon are isometric and Ψ₂ is
+        # invariant, so the balanced multipoles must not depend on the slicing
+        M, a = 1.0, 0.6
+        n̂ = SVector(1.0, 2.0, 2.0) / 3
+        ψ, θr = atan(n̂[2], n̂[1]), acos(n̂[3])
+        v⊥ = 0.25 * normalize(cross(n̂, SVector(0.0, 0.0, 1.0)))
+        for v⃗ in (0.3 * n̂, v⊥)
+            m = boost(rotate(KerrSchild(M, a), ψ, θr, 0.0), v⃗)
+            hor = find_horizon(slice_admvars(m), SVector(0.05, 0.0, 0.0), EquiangularGrid(15), 2.5, 0.0, 300; verbosity=0)
+            @test hor.success
+            res = horizon_spin(hor, slice_metric(m), slice_excurv(m); grid=EquiangularGrid(23))
+            mp = horizon_multipoles(res; lmax=6)
+            @test mp.diagnostics[:dipole_residual] < 1.0e-13
+            @test mp.diagnostics[:invariant_A] < 1.0e-12
+            # (observed: ≤ 1e-11)
+            for l in 0:6
+                ref = kerr_multipole(M, a, l)
+                @test mp.I[(l, 0)] ≈ real(ref) atol = 1.0e-9
+                @test mp.L[(l, 0)] ≈ imag(ref) atol = 1.0e-9
+            end
+            @test maximum(abs(mp.I[k]) + abs(mp.L[k]) for k in keys(mp.I) if k[2] ≠ 0) < 1.0e-9
+        end
+    end
 end
