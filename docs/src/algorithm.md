@@ -781,6 +781,111 @@ is a strong end-to-end test, but as a computational route it is inferior:
 the map (51) clusters and dilutes collocation points, and
 re-interpolation costs accuracy for no benefit.
 
+### Balanced round metric and horizon multipoles
+
+The spin, the axis and the axial field do not depend on which member of the
+Möbius family of unit round metrics the fast flow of the section
+[Uniformization by a fast flow](@ref "Uniformization by a fast flow") happens to reach.  (The parallel frame fixes two
+of the three boost parameters; a boost along the axis leaves ``\vec{J}'``, ``\vec{K}'``
+and ``\hat a_i\tilde\phi_i`` unchanged.)  Multipole moments, however, are
+integrals against the spherical harmonics ``\mathring Y_{\ell m}`` of ``\mathring{q}``, and
+these *do* change under the residual Möbius freedom.  Following
+Ashtekar, Khera, Kolanowski and Lewandowski  [10] we fix it by
+requiring that the *area dipole* vanish:
+```math
+d_i \equiv \oint \chi_i\,\epsilon = 0 ,
+```
+with the physical area form ``\epsilon``.  For any metric on ``S^2`` exactly one
+unit round metric conformal to ``q`` satisfies this ( [10], App. A);
+if ``q`` has an axial Killing field, that field is also a Killing field of the
+balanced ``\mathring{q}``.  The condition is the analogue of a centre-of-mass frame,
+with the area density in the role of the mass.
+
+**Möbius action without a new eigenproblem.**
+Identify the ``\chi_i`` with a point ``X = (1, \chi_1, \chi_2, \chi_3)`` of the
+future light cone.  A Lorentz transformation ``\Lambda\in SO^+(1,3)`` acts
+pointwise,
+```math
+\chi'_i = \frac{(\Lambda X)_i}{(\Lambda X)_0},
+  \qquad
+  \mathring{q}' = \Omega^2\,\mathring{q},\quad
+  u' = u + \ln\Omega,\quad
+  \Omega = \frac{1}{(\Lambda X)_0} ,
+```
+and the ``\chi'_i`` are again an orthonormal triple of ``\ell=1``
+eigenfunctions, now of ``\mathring{\Delta}'`` (for a boost with velocity ``\vec b`` this is
+``\chi'_\parallel = (\chi_\parallel+b)/(1+b\chi_\parallel)``,
+``\chi'_\perp = \chi_\perp/(\gamma(1+b\chi_\parallel))``).  Rotations act as
+``\chi\to R\chi`` with ``\Omega=1``.  No differential equation has to be solved
+again: the balanced triple follows from the one already computed by pointwise
+algebra.
+
+**Balancing by Newton iteration.**
+At ``\vec b = 0`` the Jacobian of ``\vec d`` with respect to the boost velocity is
+``\partial\chi'_i/\partial b_j = \delta_{ij} - \chi_i\chi_j``, so
+```math
+H_{ij} = \oint (\delta_{ij} - \chi_i\chi_j)\,\epsilon ,
+  \qquad
+  \vec b = -H^{-1}\vec d .
+```
+``H`` is positive definite, because ``\chi_i\chi_j`` has unit trace and is
+positive semidefinite.  Apply the step to the current frame, with ``|\vec b|``
+capped at ``1/2`` and halved until ``|\vec d|`` decreases, and repeat.  The
+functional whose gradient is ``\vec d`` (the Douady–Earle conformal barycenter)
+is strictly convex along boosts; this is the monotonicity argument of
+ [10], eq. (A.7).  The iteration therefore converges globally, and
+quadratically at the end; a few steps reach round-off.  Accumulate the
+composed ``\Lambda`` and apply it once to the original ``\chi_i``.
+
+**Orientation.**
+Balancing leaves a global ``SO(3)`` rotation, which mixes the ``m``-components
+of every multipole.  The package points ``\hat z`` along the real current
+dipole ``\vec L_1 = \tfrac12\oint \mathrm{d}\chi\wedge\omega``.  It points ``\hat x``
+along the principal axis with the largest eigenvalue of the in-plane block
+of the mass quadrupole ``Q_{ij} = \oint R\,\chi_i\chi_j\,\epsilon``.  If
+``\vec L_1\approx 0``, ``\hat z`` is instead the principal axis of ``Q`` whose
+eigenvalue lies farthest from the mean.  For shapes symmetric under a
+reflection, a rotation by ``\pi`` about ``\hat z``, under which
+``X_{\ell m}\to(-1)^m X_{\ell m}``, is left undetermined.
+
+**Multipoles.**
+With ``\mathring Y_{\ell m}`` the standard (Condon–Shortley) harmonics of the
+balanced round sphere, evaluated at
+``(\vartheta,\varphi) = (\arccos\chi_3, \operatorname{atan2}(\chi_2,\chi_1))``, the
+shape and current multipoles are ( [10],  [11]; on a
+non-expanding horizon ``\operatorname{Re}\Psi_2 = -R/4`` and
+``\operatorname{Im}\Psi_2\,\epsilon = \tfrac12\mathrm{d}\omega``)
+```math
+I_{\ell m} = -\oint \operatorname{Re}\Psi_2\,\mathring Y_{\ell m}\,\epsilon
+             = \frac14\oint R[q]\,\mathring Y_{\ell m}\,\epsilon ,
+  \qquad
+  L_{\ell m} = -\oint \operatorname{Im}\Psi_2\,\mathring Y_{\ell m}\,\epsilon
+             = \frac12\oint \mathrm{d}\mathring Y_{\ell m}\wedge\omega^{\mathrm{inv}} .
+```
+The second form of ``L_{\ell m}`` follows from integrating by parts; it needs
+only first derivatives and does not depend on the exact part of ``\omega``.
+Both integrands are metric-free two-forms in the dyad frame, just like the
+handedness integral (42).  The monopoles are universal,
+``I_{00} = \sqrt\pi`` and ``L_{00} = 0``, and serve as checks.  On a general
+marginally trapped surface the same integrals define the geometric shape and
+current moments of ``R[q]`` and ``\mathrm{d}\omega``.  Two further consistency checks:
+``I_{\ell,-m} = (-1)^m\bar I_{\ell m}`` (likewise for ``L``), and ``A``, ``B``
+recomputed from the generators of the balanced frame must equal their
+original values.
+
+For Kerr the balanced frame and the multipoles are known in closed
+form  [11], namely
+``\chi_3 = z(\zeta) = \tanh(\operatorname{artanh}\zeta - \beta^2\zeta)``, with
+``\zeta = \cos\theta`` and ``\beta^2 = a^2/(r_+^2+a^2)``, and
+```math
+I_\ell + iL_\ell = \tfrac12 (1+\hat a^2)^2\sqrt{(2\ell+1)\pi}
+  \int_{-1}^{1} \frac{P_\ell(z(\zeta))}{(1-i\hat a\zeta)^3}\,\mathrm{d}\zeta ,
+  \qquad \hat a = a/r_+ ,
+```
+with only ``m=0`` nonzero.  The test suite reproduces these to about
+``10^{-12}``, also on boosted slicings (all cross-sections of a Killing horizon
+are isometric).
+
 
 ## Numerical implementation
 
@@ -900,6 +1005,10 @@ Cheap, sharp internal checks, in pipeline order:
   (13), (11), (9); output
   ``J``, axis ``\hat a_i = J'_i/|\vec{J}'|``, and
   ``\phi^A = \hat a_i\tilde\phi_i{}^A`` \ (14).
+- **Multipoles (optional).**  Balance the round metric,
+  ``\oint\chi_i\,\epsilon = 0``, by Newton iteration on the pointwise Möbius
+  action; orient ``\hat z\parallel\vec L_1``; evaluate ``I_{\ell m}``,
+  ``L_{\ell m}`` (section [Balanced round metric and horizon multipoles](@ref "Balanced round metric and horizon multipoles")).
 
 
 ## Tests
@@ -933,6 +1042,12 @@ Cheap, sharp internal checks, in pipeline order:
   ``\ell_{\max}``, the internal diagnostics of
   the section [Numerical implementation](@ref "Numerical implementation"), and stability of the axis under resolution
   changes.
+- **Multipoles.**  Kerr: the balanced ``\chi_3`` and ``I_\ell``,
+  ``L_\ell`` against the closed forms of  [11], including on boosted
+  slicings, whose horizon cross-sections are different but isometric.  A
+  deformed surface in a Möbius-distorted chart: the multipoles do not depend
+  on the chart, and balancing from an arbitrarily boosted start gives the same
+  round metric.
 
 
 ## Corrections and clarifications to the `GOAL.md skeleton`
@@ -1068,5 +1183,11 @@ Phys. Rev. D **76**, 041501(R) (2007);
 Phys. Rev. D **57**, 863 (1998);
 [arXiv:gr-qc/9707050](https://arxiv.org/abs/gr-qc/9707050).
 
+10. A. Ashtekar, N. Khera, M. Kolanowski, J. Lewandowski,
+*Non-expanding horizons: multipoles and the symmetry group*,
+JHEP **01** (2022) 028;
+[arXiv:2111.07873 [gr-qc]](https://arxiv.org/abs/2111.07873).
 
-
+11. E. Gourgoulhon, A. Le Tiec, M. Casals,
+*Horizon multipole moments of a Kerr black hole* (2026);
+[arXiv:2602.05823 [gr-qc]](https://arxiv.org/abs/2602.05823).

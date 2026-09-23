@@ -144,7 +144,13 @@ anchors are:
   Killing-transport spin (`QuasiLocalMeasures`  [8]), and
   Jasiulek's published values  [2] — agreement is expected
   for nearly axisymmetric horizons, with quantifiable differences in
-  strongly distorted regimes where the definitions genuinely differ.
+  strongly distorted regimes where the definitions genuinely differ;
+- the balanced round metric and horizon multipoles of Ashtekar, Khera,
+  Kolanowski and Lewandowski  [11], which use the same
+  conformal decomposition.  Gourgoulhon, Le Tiec and Casals
+   [17] give the balanced conformal factor and the multipoles of
+  the Kerr horizon in closed form, an external anchor for the uniformization
+  and eigenfunction stages that goes beyond ``J=Ma``.
 
 ## References
 
@@ -236,5 +242,6 @@ IEEE Trans. Vis. Comput. Graphics **14**, 1030 (2008).
 Class. Quantum Grav. **14**, 977 (1997);
 [arXiv:gr-qc/9702002](https://arxiv.org/abs/gr-qc/9702002).
 
-
-
+17. E. Gourgoulhon, A. Le Tiec, M. Casals,
+*Horizon multipole moments of a Kerr black hole* (2026);
+[arXiv:2602.05823 [gr-qc]](https://arxiv.org/abs/2602.05823).

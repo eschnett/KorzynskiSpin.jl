@@ -17,6 +17,7 @@ export Uniformization, uniformize
 export SphereEigenfunctions, sphere_eigenfunctions, MobiusGenerators, mobius_generators
 export hodge_fix, momentum_integral, spin_from_invariants, mobius_boost, parallel_frame_boost
 export boosted_rotation_generators, SpinResult, horizon_spin
+export balance_frame, orient_frame, HorizonMultipoles, horizon_multipoles
 
 include("fields.jl")
 include("geometry.jl")
@@ -24,5 +25,6 @@ include("calculus.jl")
 include("uniformize.jl")
 include("eigenfunctions.jl")
 include("invariants.jl")
+include("multipoles.jl")
 
 end

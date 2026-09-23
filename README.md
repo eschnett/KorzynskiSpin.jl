@@ -42,6 +42,20 @@ result.axial           # axial vector field on the surface (dyad components)
 result.diagnostics     # residuals of the internal identities
 ```
 
+Horizon multipoles are computed from a `SpinResult`.  The round metric is
+first fixed by requiring a vanishing area dipole, the canonical choice of
+Ashtekar, Khera, Kolanowski & Lewandowski
+([arXiv:2111.07873](https://arxiv.org/abs/2111.07873)).  The frame is then
+oriented with $z$ along the current dipole:
+
+```julia
+mp = horizon_multipoles(result; lmax=8)
+mp.I[(2, 0)]           # shape (mass) multipole I_lm = ¼ ∮ R Y_lm ε
+mp.L[(1, 0)]           # current (spin) multipole L_lm = −∮ Im Ψ₂ Y_lm ε
+mp.χ                   # balanced ℓ=1 triple (Cartesian coordinates of the canonical round sphere)
+mp.diagnostics         # dipole residual, I₀₀ − √π, invariance checks
+```
+
 `metric3` and `excurv3` use a *batched* interface: they may be given as
 callables `Xs -> array` that receive **all** collocation points at once (a
 grid-shaped `Matrix{SVector{3}}`) and return γ_ij / K_ij in an array of the
@@ -100,6 +114,11 @@ A matrix of surface points at the collocation points (e.g. from
   numerically by ApparentHorizonFinder: the boost genuinely changes the
   slicing, and $J = Ma$ and the area still hold to $\sim 10^{-10}$ — the
   "tilted foliation" acid test of Korzyński's gauge fixing.
+- horizon multipoles of Kerr in the balanced frame against the closed forms
+  of Gourgoulhon, Le Tiec & Casals
+  ([arXiv:2602.05823](https://arxiv.org/abs/2602.05823)) to $\sim 10^{-12}$,
+  including on boosted slicings, plus chart independence and uniqueness of
+  the balancing for a deformed surface.
 
 ## Related work
 
