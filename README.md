@@ -76,9 +76,9 @@ no derivatives of the Cauchy data are required.
 
 ## Using ApparentHorizonFinder
 
-[ApparentHorizonFinder.jl](https://github.com/eschnett/ApparentHorizonFinder)
+[ApparentHorizonFinder.jl](https://github.com/eschnett/ApparentHorizonFinder.jl)
 (v2) finds the horizon shape on the same
-[AbstractSphericalHarmonics](https://github.com/eschnett/AbstractSphericalHarmonics.jl)
+[AbstractSphericalHarmonics.jl](https://github.com/eschnett/AbstractSphericalHarmonics.jl)
 grid objects, so its result feeds in directly — no interpolation:
 
 ```julia
@@ -105,7 +105,7 @@ A matrix of surface points at the collocation points (e.g. from
   agreement of $\vec J$ with the closed-form answer, gauge invariance under
   $\omega \to \omega + \mathrm{d}g$),
 - Kerr in the Kerr–Schild slicing (analytic data from
-  [SpacetimeMetrics.jl](https://github.com/eschnett/SpacetimeMetrics),
+  [SpacetimeMetrics.jl](https://github.com/eschnett/SpacetimeMetrics.jl),
   including its `rotate`/`translate` transformers): $J = Ma$ to machine
   precision ($\sim 10^{-15}$ at `lmax=20`), $\vec K = 0$, spin axis
   recovered, also under rotations+translations of the data, with spectral
